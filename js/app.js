@@ -16,7 +16,7 @@ const appEl = $('#app');
 const viewEl = $('#view');
 
 let current = 'today';
-let cal = { connected: false, events: [], calendars: [] };
+let cal = { connected: false, events: [], calendars: [], canList: false };
 let mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
 let sy = { status: 'off', lastSynced: 0, msg: '', again: false }; // sync between devices
 let syncTimer = null;
@@ -181,7 +181,7 @@ async function doLock() {
   store.lock();
   google.forget();
   sync.reset();
-  cal = { connected: false, events: [], calendars: [] };
+  cal = { connected: false, events: [], calendars: [], canList: false };
   mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
   sy = { status: 'off', lastSynced: 0, msg: '', again: false };
   viewEl.innerHTML = '';
@@ -322,6 +322,7 @@ document.querySelector('.nav').addEventListener('click', (e) => {
 async function refreshCalendar() {
   try {
     const from = startOfDay();
+    cal.canList = gcal.canListCalendars();
     cal.calendars = await gcal.listCalendars().catch(() => cal.calendars);
     cal.events = await gcal.listEvents(from, new Date(from.getTime() + 7 * DAY), cal.calendars);
     cal.connected = true;
@@ -370,7 +371,7 @@ async function pushToCalendar(ev) {
   if (!cal.calendars.length) cal.calendars = await gcal.listCalendars().catch(() => []);
   const target = targetCalendar(ev.calendarId);
   await gcal.createEvent({ ...ev, calendarId: target.id });
-  toast(`Added to ${target.primary || target.id === 'primary' ? 'your main calendar' : target.name}`);
+  toast(`Added to ${target.primary || target.id === 'primary' ? 'your main calendar' : target.name}${gcal.canListCalendars() ? '' : '. To choose another calendar, tap Allow on the Calendar tab.'}`);
   refreshCalendar();
 }
 
@@ -481,7 +482,7 @@ viewEl.addEventListener('click', async (e) => {
       case 'gcal-disconnect':
       case 'google-disconnect':
         google.disconnect(); sync.reset();
-        cal = { connected: false, events: [], calendars: [] }; mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
+        cal = { connected: false, events: [], calendars: [], canList: false }; mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
         sy = { ...sy, status: 'off' };
         toast('Disconnected from Google on this device'); return render();
       case 'google-connect': await connectGoogle(); toast('Connected to Google'); return afterConnect();
@@ -494,6 +495,17 @@ viewEl.addEventListener('click', async (e) => {
       case 'exp-del': s.expenses = s.expenses.filter((x) => x.id !== id); return commit('Expense deleted');
       case 'gcal-connect': await connectGoogle(); toast('Connected to Google'); return afterConnect();
       case 'gcal-refresh': return refreshCalendar();
+      case 'gcal-allow-list': {
+        try {
+          await google.connect(clientId(), { only: ['calendarList'] });
+        } catch (err) {
+          if (err.message !== 'NOT_GRANTED') throw err;
+          throw new Error("Google didn't give permission to see your calendar list. Tap Allow again and choose Continue/Allow.");
+        }
+        cal.connected = gcal.isConnected(); mail.connected = gmail.isConnected();
+        await refreshCalendar();
+        return toast(cal.calendars.length ? 'You can now choose a calendar' : 'Allowed, but Google returned no calendars you can add to');
+      }
       case 'notif-enable': await Notification.requestPermission(); return render();
       case 'brief-now': return sendBrief(true);
       case 'export': {

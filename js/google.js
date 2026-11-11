@@ -51,7 +51,7 @@ let generation = 0; // bumped on lock/disconnect, so a sign-in that finishes aft
  * straight from a tap/submit handler: when Google's script is already loaded, the request is made
  * synchronously, inside the tap.
  */
-export function connect(clientId, { silent = false } = {}) {
+export function connect(clientId, { silent = false, only = null } = {}) {
   if (!clientId) return Promise.reject(new Error('Add your Google OAuth Client ID first (Settings).'));
   if (pending) return pending;
   const myGen = generation;
@@ -59,7 +59,9 @@ export function connect(clientId, { silent = false } = {}) {
     const hint = local.get('ct.googleHint');
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: [...Object.values(SCOPES), 'email'].join(' '),
+      // `only`: ask for just these permissions (Google shows one simple screen, nothing to tick);
+      // include_granted_scopes keeps everything you allowed before.
+      scope: only ? only.map((n) => SCOPES[n]).join(' ') : [...Object.values(SCOPES), 'email'].join(' '),
       include_granted_scopes: true,
       ...(silent ? { prompt: '' } : {}),
       ...(hint ? { hint } : {}),
@@ -69,6 +71,7 @@ export function connect(clientId, { silent = false } = {}) {
         token = resp.access_token;
         tokenExpiry = Date.now() + (Number(resp.expires_in) - 60) * 1000;
         granted = new Set(Object.values(SCOPES).filter((sc) => google.accounts.oauth2.hasGrantedAllScopes(resp, sc)));
+        if (only && !only.every((n) => granted.has(SCOPES[n]))) return reject(new Error('NOT_GRANTED'));
         local.set('ct.autoGoogle', '1');
         if (!hint) rememberAccount();
         resolve(granted);

@@ -408,6 +408,13 @@ export function tasksView(s, cal) {
 }
 
 // ---------- TRAINING ----------
+// Shown instead of a calendar picker when Google hasn't allowed the app to see your calendar list yet.
+function calendarAccessNote(cal) {
+  if (!cal.connected || (cal.calendars || []).length) return '';
+  return `<div class="notice"><p>${cal.canList ? "Couldn't load your calendars." : 'To choose which calendar, Google needs to let the app see your list of calendars (names only).'} Until then, events go to your main calendar.</p>
+    <button type="button" class="btn-ghost sm" data-act="${cal.canList ? 'gcal-refresh' : 'gcal-allow-list'}">${cal.canList ? 'Try again' : 'Allow'}</button></div>`;
+}
+
 // Options for a calendar <select>: your calendars, main one first, `chosen` selected (else the main one).
 function calendarOptions(cal, chosen) {
   const list = cal.calendars || [];
@@ -420,6 +427,7 @@ export function trainingView(s, cal = {}) {
   const trainingDefault = s.settings.trainingCalendarId || s.settings.calendarId;
   const list = [...s.trainings].sort((a, b) => (a.nextSession || '9999').localeCompare(b.nextSession || '9999'));
   return `<header class="page-head"><h1>Training tracker</h1></header>
+  ${cal.connected && !calOk ? `<section class="card">${calendarAccessNote(cal)}</section>` : ''}
   <section class="card">
     <details ${list.length ? '' : 'open'}><summary class="btn-ghost">+ New training programme</summary>
     <form class="stack-form" data-form="training">
@@ -481,7 +489,8 @@ function eventRow(e, cal) {
 
 function calendarPicker(s, cal) {
   const list = cal.calendars || [];
-  if (!cal.connected || !list.length) return '';
+  if (!cal.connected) return '';
+  if (!list.length) return calendarAccessNote(cal);
   const chosen = list.some((c) => c.id === s.settings.calendarId) ? s.settings.calendarId : (list.find((c) => c.primary) || list[0]).id;
   return `<label>Calendar<select name="calendarId">${list.map((c) => `<option value="${esc(c.id)}" ${c.id === chosen ? 'selected' : ''}>${esc(c.primary ? `${c.name} (main)` : c.name)}</option>`).join('')}</select>
     <span class="hint">Remembered, and also used when you send to-dos and trainings to Google Calendar.</span></label>`;
