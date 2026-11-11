@@ -140,6 +140,9 @@ function enterApp(autoGoogle = null) {
   lockBody.innerHTML = '';
   lastActivity = Date.now();
   autoErr = '';
+  // keep a readable copy of the (non-secret) Client ID, so the next unlock can reconnect Google by itself
+  if (store.state.settings.googleClientId) rememberClientId(store.state.settings.googleClientId);
+  lastFailedTry = 0;
   render();
   startTicker();
   if (clientId()) google.preload().catch(() => {});
@@ -159,16 +162,16 @@ function enterApp(autoGoogle = null) {
 // Google's access lasts about an hour. When it's nearly up, renew it on your next tap (it has to be a tap),
 // silently, so syncing and imports carry on.
 let autoErr = '';
-let lastRenewTry = 0;
-window.addEventListener('pointerdown', () => {
+let lastFailedTry = 0; // after a failed attempt, wait 5 minutes before trying again on a tap
+// Also the fallback when reconnecting at Unlock didn't happen or was blocked: your first tap reconnects.
+window.addEventListener('pointerdown', (e) => {
   if (!store.isUnlocked() || !google.autoConnectOn() || !clientId()) return;
-  const wasOn = google.isConnected() || sy.lastSynced || cal.connected || mail.connected;
-  if (!wasOn || google.msLeft() > 5 * 60_000 || Date.now() - lastRenewTry < 5 * 60_000) return;
-  lastRenewTry = Date.now();
+  if (e.target.closest?.('[data-act="lock"], [data-act="google-disconnect"], [data-act="gmail-disconnect"], [data-act="gcal-disconnect"]')) return;
+  if (google.msLeft() > 5 * 60_000 || Date.now() - lastFailedTry < 5 * 60_000) return;
   const wasExpired = !google.isConnected();
   google.connect(clientId(), { silent: true })
     .then(() => { cal.connected = gcal.isConnected(); mail.connected = gmail.isConnected(); autoErr = ''; if (wasExpired) return afterConnect(); })
-    .catch((err) => { autoErr = err.message; safeRender(); });
+    .catch((err) => { autoErr = err.message; lastFailedTry = Date.now(); safeRender(); });
 }, { capture: true, passive: true });
 
 async function doLock() {

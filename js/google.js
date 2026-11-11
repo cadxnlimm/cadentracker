@@ -41,6 +41,7 @@ const local = {
 export const autoConnectOn = () => local.get('ct.autoGoogle') === '1';
 
 let pending = null;
+let generation = 0; // bumped on lock/disconnect, so a sign-in that finishes afterwards is thrown away
 
 /**
  * Signs in to Google. With {silent: true} (you've allowed it before) Google's window opens and closes
@@ -51,6 +52,7 @@ let pending = null;
 export function connect(clientId, { silent = false } = {}) {
   if (!clientId) return Promise.reject(new Error('Add your Google OAuth Client ID first (Settings).'));
   if (pending) return pending;
+  const myGen = generation;
   const run = () => new Promise((resolve, reject) => {
     const hint = local.get('ct.googleHint');
     const client = google.accounts.oauth2.initTokenClient({
@@ -61,6 +63,7 @@ export function connect(clientId, { silent = false } = {}) {
       ...(hint ? { hint } : {}),
       callback: (resp) => {
         if (resp.error) return reject(new Error(resp.error_description || resp.error));
+        if (myGen !== generation) return reject(new Error('The app was locked before Google finished'));
         token = resp.access_token;
         tokenExpiry = Date.now() + (Number(resp.expires_in) - 60) * 1000;
         granted = new Set(Object.values(SCOPES).filter((sc) => google.accounts.oauth2.hasGrantedAllScopes(resp, sc)));
@@ -88,6 +91,8 @@ async function rememberAccount() {
 
 // Drops the token from memory only (used when the app locks).
 export function forget() {
+  generation++;
+  pending = null;
   token = null;
   tokenExpiry = 0;
   granted = new Set();

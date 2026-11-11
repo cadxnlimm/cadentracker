@@ -120,7 +120,7 @@ function syncBanner(s, sync) {
   }
   if (sync.status === 'connecting' && !sync.google) return '';
   if (!sync.google && (s.settings.syncEnabled || s.settings.googleClientId)) {
-    const why = sync.auto ? (sync.autoErr ? `Couldn't reconnect automatically: ${esc(sync.autoErr)}` : 'Not connected right now.') : '';
+    const why = sync.auto ? (sync.autoErr ? `Couldn't reconnect automatically: ${esc(sync.autoErr)}` : 'Tap anywhere to reconnect.') : '';
     return `<section class="card banner"><div><h2>${s.settings.syncEnabled ? 'Sync with your other devices' : 'Connect Google'}</h2>
       <p class="muted">${why ? `${why} ` : ''}One tap ${s.settings.syncEnabled ? 'syncs your phone and laptop, ' : ''}imports new DBS spending and shows your calendar.${sync.auto ? '' : ' After this, it reconnects by itself whenever you unlock.'}</p></div>
       <button class="btn" data-act="google-connect">Connect Google</button></section>`;
