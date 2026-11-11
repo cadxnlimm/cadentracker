@@ -84,7 +84,7 @@ GitHub Pages on a private repo needs a paid GitHub plan. Free alternatives that 
 
 ```
 index.html            App shell + Content-Security-Policy
-css/styles.css        Styles (light/dark, mobile bottom nav, desktop sidebar)
+css/styles.css        Mist Blue neumorphism styles (floating bottom nav on phone, sidebar on laptop)
 js/crypto.js          PBKDF2 + AES-GCM encryption
 js/store.js           Encrypted IndexedDB vault, backups
 js/gcal.js            Google Calendar (direct from browser) + .ics export

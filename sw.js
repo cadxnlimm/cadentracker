@@ -1,6 +1,6 @@
 // Caches the app's own files so it opens offline. It never caches your data (that lives
 // encrypted in IndexedDB) and never touches requests to Google.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/styles.css',
   'js/app.js', 'js/store.js', 'js/crypto.js', 'js/gcal.js', 'js/views.js', 'js/util.js',
