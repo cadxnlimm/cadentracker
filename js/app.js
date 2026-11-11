@@ -1,5 +1,7 @@
 import * as store from './store.js';
 import * as gcal from './gcal.js';
+import * as gmail from './gmail.js';
+import { parseAlert, categorize, merchantKey, CATEGORIES } from './expenses.js';
 import * as V from './views.js';
 import { esc, formData, parseDT, parseDay, isoDay, advanceDue, download, DAY, startOfDay, fmtTime } from './util.js';
 
@@ -11,6 +13,7 @@ const viewEl = $('#view');
 
 let current = 'today';
 let cal = { connected: false, events: [] };
+let mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
 let lastActivity = Date.now();
 let ticker = null;
 
@@ -93,8 +96,10 @@ function enterApp() {
 
 function doLock() {
   store.lock();
-  gcal.disconnect();
+  gcal.forget();
+  gmail.forget();
   cal = { connected: false, events: [] };
+  mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
   viewEl.innerHTML = '';
   clearInterval(ticker);
   showLock();
@@ -109,8 +114,8 @@ function render() {
   if (!store.isUnlocked()) return;
   const s = store.state;
   const html = {
-    today: () => V.today(s, cal),
-    money: () => V.moneyView(s),
+    today: () => V.today(s, cal, mail),
+    money: () => V.moneyView(s, mail),
     tasks: () => V.tasksView(s, cal),
     training: () => V.trainingView(s),
     calendar: () => V.calendarView(s, cal),
@@ -186,6 +191,61 @@ function safeName(s) {
   return String(s).replace(/[^\w\- ]+/g, '').trim().slice(0, 40) || 'event';
 }
 
+// ---------------- expenses from DBS alert emails ----------------
+function addExpense(p, source, msgId = '') {
+  const s = store.state;
+  s.expenses.push({
+    id: store.uid(), when: p.when.toISOString(), amount: p.amount, currency: p.currency, merchant: p.merchant,
+    category: categorize(p.merchant, p.via, { rules: s.categoryRules, bills: s.bills }), via: p.via, source, msgId,
+  });
+}
+
+// interactive: true when you pressed the button (may open Google's sign-in); false for the quiet background check.
+async function syncExpenses(interactive) {
+  const s = store.state;
+  if (mail.syncing) return;
+  if (!gmail.isConnected()) {
+    if (!interactive) return;
+    await gmail.connect(s.settings.googleClientId);
+  }
+  mail.connected = true;
+  mail.syncing = true;
+  if (current === 'money' || current === 'today') render();
+  const sync = s.expenseSync;
+  const seen = new Set(sync.seen);
+  const now = new Date();
+  // first time: from the start of this month; after that, re-check 2 days back so nothing slips through
+  const after = sync.lastSync ? sync.lastSync - 2 * 86400 : new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000;
+  let added = 0, skipped = 0, unverified = 0;
+  try {
+    const ids = (await gmail.listAlertIds(after)).filter((id) => !seen.has(id));
+    for (const id of ids) {
+      const d = gmail.decode(await gmail.getMessage(id));
+      sync.seen.push(id);
+      if (!gmail.isGenuineDbs(d)) { unverified++; continue; }
+      const p = parseAlert(d.body, { subject: d.subject, sender: d.sender, sentAt: d.sentAt });
+      if (p.skip) { skipped++; continue; }
+      addExpense(p, 'email', id);
+      added++;
+    }
+    sync.seen = sync.seen.slice(-2000);
+    sync.lastSync = Math.floor(now.getTime() / 1000);
+    mail.lastChecked = Date.now();
+    mail.note = [
+      unverified && `${unverified} email${unverified === 1 ? '' : 's'} ignored because ${unverified === 1 ? 'it' : 'they'} couldn't be verified as really from DBS`,
+      skipped && `${skipped} alert${skipped === 1 ? " wasn't" : "s weren't"} spending (e.g. money in, OTPs, declined)`,
+    ].filter(Boolean).join(' · ');
+    await store.save();
+    if (interactive || added) toast(added ? `Logged ${added} new expense${added === 1 ? '' : 's'} from DBS` : 'No new DBS spending');
+  } catch (err) {
+    mail.connected = gmail.isConnected();
+    throw err;
+  } finally {
+    mail.syncing = false;
+    render();
+  }
+}
+
 // ---------------- clicks ----------------
 viewEl.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-act]');
@@ -208,6 +268,9 @@ viewEl.addEventListener('click', async (e) => {
       case 'training-del': if (!confirm('Delete this training and its history?')) return; s.trainings = s.trainings.filter((x) => x.id !== id); return commit();
       case 'training-gcal': return pushToCalendar(eventFromTraining(find(s.trainings)));
       case 'training-ics': { const t = find(s.trainings); return download(`${safeName(t.name)}.ics`, gcal.icsFor(eventFromTraining(t)), 'text/calendar'); }
+      case 'gmail-sync': return await syncExpenses(true);
+      case 'gmail-disconnect': gmail.disconnect(); mail = { connected: false, syncing: false, lastChecked: 0, note: '' }; return render();
+      case 'exp-del': s.expenses = s.expenses.filter((x) => x.id !== id); return commit('Expense deleted');
       case 'gcal-connect': await ensureCalendar(); toast('Google Calendar connected'); return refreshCalendar();
       case 'gcal-refresh': return refreshCalendar();
       case 'gcal-disconnect': gcal.disconnect(); cal = { connected: false, events: [] }; return render();
@@ -225,6 +288,20 @@ viewEl.addEventListener('click', async (e) => {
 });
 
 viewEl.addEventListener('change', async (e) => {
+  if (e.target.dataset.act === 'exp-cat') {
+    const s = store.state;
+    const x = s.expenses.find((ex) => ex.id === e.target.dataset.id);
+    const cat = e.target.value;
+    if (!x || !CATEGORIES.includes(cat)) return;
+    const key = merchantKey(x.merchant);
+    let others = 0;
+    if (key) {
+      s.categoryRules[key] = cat; // remembered for future imports from this payee
+      for (const ex of s.expenses) if (ex !== x && merchantKey(ex.merchant) === key && ex.category !== cat) { ex.category = cat; others++; }
+    }
+    x.category = cat;
+    return commit(others ? `Updated ${others + 1} from ${x.merchant}; future ones too` : `Got it, ${x.merchant} will go under ${cat} from now on`);
+  }
   if (e.target.dataset.act !== 'import') return;
   const file = e.target.files[0];
   if (!file) return;
@@ -265,6 +342,22 @@ viewEl.addEventListener('submit', async (e) => {
       case 'income':
         s.income.push({ id: store.uid(), source: f.source.trim(), amount: num(f.amount), date: f.date, recurring: f.recurring ? 'monthly' : 'none' });
         return commit('Income logged');
+
+      case 'expense': {
+        const when = f.date === isoDay() ? new Date() : parseDay(f.date);
+        if (f.date !== isoDay()) when.setHours(12);
+        s.expenses.push({ id: store.uid(), when: when.toISOString(), amount: num(f.amount), currency: s.settings.currency, merchant: f.merchant.trim(),
+          category: CATEGORIES.includes(f.category) ? f.category : 'Other', via: 'cash', source: 'manual', msgId: '' });
+        return commit('Expense logged');
+      }
+
+      case 'paste-alert': {
+        const p = parseAlert(f.alert, { sentAt: new Date() });
+        if (p.skip) throw new Error(p.skip === 'no amount' || p.skip === 'no payee' ? "Couldn't find an amount and payee in that text" : `That alert isn't spending (${p.skip})`);
+        addExpense(p, 'pasted');
+        form.reset();
+        return commit(`Logged ${p.currency} ${p.amount.toFixed(2)} at ${p.merchant}`);
+      }
 
       case 'saving':
         s.savings.push({ id: store.uid(), name: f.name.trim(), monthly: num(f.monthly), target: num(f.target), saved: num(f.saved) });
@@ -410,6 +503,7 @@ function startTicker() {
     if (!store.isUnlocked()) return;
     if (Date.now() - lastActivity > Number(store.state.settings.autoLockMin || 10) * 60000) return doLock();
     try { await checkReminders(); await sendBrief(); } catch (err) { console.warn(err); }
+    if (gmail.isConnected() && Date.now() - mail.lastChecked > 10 * 60_000) syncExpenses(false).catch((err) => console.warn(err));
   };
   tick();
   ticker = setInterval(tick, 30_000);

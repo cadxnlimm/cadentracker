@@ -1,4 +1,5 @@
 // Each view returns an HTML string. Every piece of user data passes through esc().
+import { CATEGORIES, NOT_SPENDING } from './expenses.js';
 import { esc, money, fmtDay, fmtDT, fmtTime, parseDay, parseDT, startOfDay, sameDay, isoDay, DAY, monthlyCost } from './util.js';
 
 const hasTime = (s) => !!s && s.length > 10;
@@ -16,7 +17,13 @@ export function monthSummary(s) {
   }, 0);
   const committed = s.bills.reduce((sum, b) => sum + monthlyCost(b), 0);
   const saving = s.savings.reduce((sum, g) => sum + (Number(g.monthly) || 0), 0);
-  return { income, committed, saving, left: income - committed - saving };
+  const cur = s.settings.currency;
+  const monthExp = (s.expenses || []).filter((x) => { const d = new Date(x.when); return d >= m0 && d < m1; });
+  const counted = monthExp.filter((x) => x.currency === cur && !NOT_SPENDING.has(x.category));
+  const spent = counted.reduce((sum, x) => sum + Number(x.amount), 0);
+  const byCat = {};
+  for (const x of counted) byCat[x.category] = (byCat[x.category] || 0) + Number(x.amount);
+  return { income, committed, saving, spent, byCat, monthExp, left: income - committed - saving - spent };
 }
 
 export function upcoming(s, days = 7) {
@@ -78,7 +85,7 @@ function stat(label, value, cls = '') {
 }
 
 // ---------- TODAY (morning brief) ----------
-export function today(s, cal) {
+export function today(s, cal, mail = {}) {
   const u = upcoming(s);
   const m = monthSummary(s);
   const cur = s.settings.currency;
@@ -125,13 +132,95 @@ export function today(s, cal) {
       ${stat('Income', money(m.income, cur))}
       ${stat('Bills & subs', money(m.committed, cur))}
       ${stat('Set aside to save', money(m.saving, cur))}
+      ${stat('Spent so far', money(m.spent, cur))}
       ${stat('Left to spend', money(m.left, cur), m.left < 0 ? 'neg' : 'pos')}
     </div>
+    ${s.settings.googleClientId && !mail.connected ? `<div class="btn-row spaced"><button class="btn-ghost sm" data-act="gmail-sync">Import new DBS spending</button></div>` : ''}
   </section>`;
 }
 
 // ---------- MONEY ----------
-export function moneyView(s) {
+const VIA = { card: 'Card', paynow: 'PayNow', paylah: 'PayLah!', transfer: 'Transfer', cash: 'Added by you' };
+
+function expenseRow(x, cur) {
+  const d = new Date(x.when);
+  const foreign = x.currency !== cur;
+  const excluded = NOT_SPENDING.has(x.category);
+  return `<li class="row col exp-row">
+    <div class="row-head">
+      <div class="row-main">
+        <div class="row-title">${esc(x.merchant)}</div>
+        <div class="row-sub">${esc(fmtDT(d, x.source !== 'manual'))} · ${esc(VIA[x.via] || x.via)}${foreign ? ' · other currency, not in totals' : excluded ? ' · not counted as spending' : ''}</div>
+      </div>
+      <div class="exp-amt ${excluded || foreign ? 'muted' : ''}">${esc(money(x.amount, x.currency))}</div>
+    </div>
+    <div class="exp-actions">
+      <label class="sr-only" for="cat-${esc(x.id)}">Category for ${esc(x.merchant)}</label>
+      <select class="sm-select" id="cat-${esc(x.id)}" data-act="exp-cat" data-id="${esc(x.id)}">${CATEGORIES.map((c) => `<option ${c === x.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <button class="btn-ghost sm danger" data-act="exp-del" data-id="${esc(x.id)}" aria-label="Delete expense">✕</button>
+    </div>
+  </li>`;
+}
+
+function spendingCard(s, m, mail) {
+  const cur = s.settings.currency;
+  const cats = Object.entries(m.byCat).sort((a, b) => b[1] - a[1]);
+  const max = cats[0]?.[1] || 1;
+  const list = [...m.monthExp].sort((a, b) => new Date(b.when) - new Date(a.when));
+  const earlier = (s.expenses || []).filter((x) => !m.monthExp.includes(x)).sort((a, b) => new Date(b.when) - new Date(a.when)).slice(0, 100);
+  const last = s.expenseSync?.lastSync ? new Date(s.expenseSync.lastSync * 1000) : null;
+
+  let sync;
+  if (!s.settings.googleClientId) {
+    sync = `<p class="muted">Add your Google Client ID in Settings first, then come back here to connect your DBS alert emails.</p>
+      <button class="btn-ghost" data-act="goto" data-view="settings">Go to Settings</button>`;
+  } else if (mail.syncing) {
+    sync = `<p class="sync-line"><span class="pulse" aria-hidden="true"></span>Checking your DBS alert emails…</p>`;
+  } else if (mail.connected) {
+    sync = `<p class="sync-line"><span class="dot dot-ok" aria-hidden="true"></span>Auto-importing from DBS emails while the app is open${last ? ` · last checked ${esc(fmtTime(last))}` : ''}</p>
+      ${mail.note ? `<p class="muted small">${esc(mail.note)}</p>` : ''}
+      <div class="btn-row"><button class="btn-ghost sm" data-act="gmail-sync">Check now</button><button class="btn-ghost sm" data-act="gmail-disconnect">Disconnect Gmail</button></div>`;
+  } else {
+    sync = `<p class="muted">${last ? `Last imported ${esc(fmtDT(last))}. ` : ''}Your DBS alert emails become expenses automatically. Nothing to type.</p>
+      <button class="btn" data-act="gmail-sync">${last ? 'Import new DBS spending' : 'Connect Gmail & import'}</button>
+      ${last ? '' : `<details class="setup"><summary class="muted">First time? 2 things to set up</summary>
+        <ol class="steps">
+          <li><strong>Get an email for every DBS payment.</strong> In digibank: <em>More → Manage Alerts</em>. For your cards, set the alert threshold to <strong>S$0.01</strong> and tick <strong>Email</strong>. Do the same for <em>Funds transfer / PayNow</em>. For PayLah!, turn on <em>Outgoing Payments</em> email alerts in the PayLah! app.</li>
+          <li><strong>Turn on the Gmail API</strong> in the same Google Cloud project as your Calendar setup: <em>APIs &amp; Services → Library → Gmail API → Enable</em>.</li>
+        </ol>
+        <p class="muted small">The app only asks Gmail for emails from ibanking.alert@dbs.com and paylah.alert@dbs.com, checks each is genuinely from DBS, and keeps just the amount, payee and date, encrypted on this device. Google's screen will say "read your email" because Gmail has no narrower permission.</p>
+      </details>`}`;
+  }
+
+  return `<section class="card">
+    <div class="row-head"><h2>Spending this month</h2><span class="big-num">${esc(money(m.spent, cur))}</span></div>
+    ${sync}
+    ${cats.length ? `<ul class="cat-bars">${cats.map(([c, v]) => `<li><span class="cat-name">${esc(c)}</span><span class="progress"><span data-w="${(v / max) * 100}"></span></span><span class="cat-amt">${esc(money(v, cur))}</span></li>`).join('')}</ul>` : ''}
+    ${list.length ? `<ul class="list">${list.map((x) => expenseRow(x, cur)).join('')}</ul>` : empty('No spending logged this month yet.')}
+    ${earlier.length ? `<details><summary class="muted">Earlier (${earlier.length})</summary><ul class="list">${earlier.map((x) => expenseRow(x, cur)).join('')}</ul></details>` : ''}
+    <details class="add-exp"><summary class="btn-ghost sm">+ Cash or other spending</summary>
+      <form class="stack-form" data-form="expense">
+        <div class="field-row">
+          <label>What / where<input name="merchant" required placeholder="e.g. Hawker lunch" autocomplete="off"></label>
+          <label>Amount<input name="amount" type="number" step="0.01" min="0.01" required inputmode="decimal"></label>
+        </div>
+        <div class="field-row">
+          <label>Category<select name="category">${CATEGORIES.map((c) => `<option>${esc(c)}</option>`).join('')}</select></label>
+          <label>Date<input name="date" type="date" value="${isoDay()}" required></label>
+        </div>
+        <button class="btn">Add expense</button>
+      </form>
+    </details>
+    <details class="add-exp"><summary class="btn-ghost sm">Paste a DBS alert</summary>
+      <form class="stack-form" data-form="paste-alert">
+        <label>Copy the text of a DBS alert (email, SMS or digibank notification) and paste it here<textarea name="alert" rows="4" required placeholder="Amount: SGD12.34&#10;From: DBS/POSB card ending 1234&#10;To: ..."></textarea></label>
+        <button class="btn-ghost">Log it</button>
+      </form>
+    </details>
+  </section>`;
+}
+
+export function moneyView(s, mail = {}) {
   const cur = s.settings.currency;
   const m = monthSummary(s);
   const yearly = s.bills.reduce((sum, b) => sum + monthlyCost(b) * 12, 0);
@@ -144,14 +233,18 @@ export function moneyView(s) {
       ${stat('Income this month', money(m.income, cur))}
       ${stat('Bills & subs / month', money(m.committed, cur))}
       ${stat('Saving / month', money(m.saving, cur))}
+      ${stat('Spent so far', money(m.spent, cur))}
       ${stat('Left to spend', money(m.left, cur), m.left < 0 ? 'neg' : 'pos')}
     </div>
     ${m.income > 0 ? `<div class="split-bar" aria-hidden="true">
       <span class="seg seg-bills" data-w="${Math.min(100, (m.committed / m.income) * 100)}"></span>
       <span class="seg seg-save" data-w="${Math.min(100, (m.saving / m.income) * 100)}"></span>
+      <span class="seg seg-spent" data-w="${Math.min(100, (m.spent / m.income) * 100)}"></span>
     </div>
-    <div class="legend"><span><i class="seg-bills"></i>Bills & subs</span><span><i class="seg-save"></i>Savings</span><span><i class="seg-free"></i>Free</span></div>` : ''}
+    <div class="legend"><span><i class="seg-bills"></i>Bills & subs</span><span><i class="seg-save"></i>Savings</span><span><i class="seg-spent"></i>Spent</span><span><i class="seg-free"></i>Free</span></div>` : ''}
   </section>
+
+  ${spendingCard(s, m, mail)}
 
   <div class="grid-2">
     <section class="card">
@@ -364,7 +457,7 @@ export function settingsView(s, perm) {
         <label>Morning brief at<select name="morningHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${Number(st.morningHour) === h ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></label>
         <label>Auto-lock after<select name="autoLockMin">${[1, 5, 10, 30, 60].map((m) => `<option value="${m}" ${Number(st.autoLockMin) === m ? 'selected' : ''}>${m} min idle</option>`).join('')}</select></label>
       </div>
-      <label>Google OAuth Client ID <span class="muted small">(for calendar; see README)</span><input name="googleClientId" value="${esc(st.googleClientId)}" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
+      <label>Google OAuth Client ID <span class="muted small">(for Calendar and DBS spending import; see README)</span><input name="googleClientId" value="${esc(st.googleClientId)}" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
       <button class="btn">Save settings</button>
     </form>
   </section>

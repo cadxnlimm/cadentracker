@@ -17,6 +17,9 @@ export function emptyState() {
     bills: [],          // {id, name, amount, cycle: 'weekly'|'monthly'|'yearly', nextDue, kind: 'subscription'|'bill'}
     tasks: [],          // {id, title, due, notes, done, remind, notified}
     trainings: [],      // {id, name, trainees, totalLessons, currentLesson, nextSession, notes, log: [{date, lesson, note}]}
+    expenses: [],       // {id, when, amount, currency, merchant, category, via: 'card'|'paynow'|'paylah'|'transfer'|'cash', source: 'email'|'manual'|'pasted', msgId}
+    categoryRules: {},  // merchantKey -> category, learnt when you re-categorise an expense
+    expenseSync: { lastSync: 0, seen: [] }, // Gmail alert import: last check (unix s) and alert IDs already read
     settings: { currency: 'SGD', googleClientId: '', morningHour: 8, lastBrief: '', autoLockMin: 10 },
   };
 }

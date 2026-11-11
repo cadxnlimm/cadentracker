@@ -9,7 +9,7 @@ let token = null;
 let tokenExpiry = 0;
 let client = null;
 
-function loadGis() {
+export function loadGis() {
   if (window.google?.accounts?.oauth2) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -41,8 +41,14 @@ export async function connect(clientId) {
   });
 }
 
+// Signs out at Google too (you'll see the consent screen again next time).
 export function disconnect() {
   if (token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(token, () => {});
+  forget();
+}
+
+// Drops the token from memory only (used when the app locks). It expires at Google within the hour.
+export function forget() {
   token = null;
   tokenExpiry = 0;
 }

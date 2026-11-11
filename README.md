@@ -9,7 +9,7 @@ It's a web app you can install on your phone's home screen and also open on your
 | Section | Features |
 |---|---|
 | **Today** | Morning brief: overdue and today's to-dos, today's calendar events, this week's to-dos, trainings and bills, and the month's money snapshot. Quick-add a to-do. |
-| **Money** | Log income (one-off or monthly). Savings budgets with a monthly amount, a goal and progress. Bills & subscriptions with weekly/monthly/yearly cycles, a "Paid" button that rolls the due date forward, and monthly/yearly totals. "Left to spend" = income − bills − savings. |
+| **Money** | Log income (one-off or monthly). Savings budgets with a monthly amount, a goal and progress. Bills & subscriptions with weekly/monthly/yearly cycles, a "Paid" button that rolls the due date forward, and monthly/yearly totals. **Spending is logged automatically from your DBS/POSB alert emails** (card, PayNow, PayLah!), sorted into categories you can correct (the app remembers your corrections). Cash can be added by hand, or paste any DBS alert text. "Left to spend" = income − bills − savings − spending. |
 | **To-dos** | To-dos with due date/time, notes and reminders. You can push any to-do to Google Calendar or download it as an `.ics` file. |
 | **Training** | Each programme tracks group/trainees, current lesson out of total, next session, notes and a lesson history. "Lesson done" logs it, moves to the next lesson and asks for the next date. |
 | **Calendar** | Connect Google Calendar to see the next 7 days and add events (with a reminder) when you want to. |
@@ -22,6 +22,7 @@ It's a web app you can install on your phone's home screen and also open on your
 - **Auto-lock.** After a set idle time (10 min by default) the key is wiped from memory and you have to unlock again.
 - **Strict Content-Security-Policy.** The page can only run its own scripts and talk to Google's Calendar API. It can't send data anywhere else.
 - **Google Calendar is opt-in.** Google's sign-in script only loads when you press *Connect*. Calls go straight from your browser to Google. The access token lives in memory only and expires within an hour. Events you put in Google Calendar are, of course, stored by Google.
+- **DBS spending import is opt-in and read-only.** When you press *Connect Gmail & import*, the app asks Gmail (straight from your device) only for emails from `ibanking.alert@dbs.com` and `paylah.alert@dbs.com`. Each email must pass the DMARC check that Google's own mail servers stamped on it for `dbs.com`, so a fake "DBS" email can't add expenses. The email is read in memory and only the amount, payee, date and payment type are kept, encrypted. No bank login, no aggregator, no server. Google's consent screen says "read your email" because Gmail has no narrower permission; the app's code only ever searches for those two senders.
 - **No recovery.** If you forget your passphrase, nobody can recover the data, including you. Export a backup now and then.
 
 > Code vs data: it's fine for this repo to be public because it holds **only code**, never your data. If you'd rather keep the code private too, see "Hosting from a private repo" below.
@@ -67,7 +68,18 @@ The app uses your **own** Google Cloud OAuth client, so no third-party app ever 
    - `http://localhost:8000` (only if you'll run it locally)
 5. Copy the **Client ID** (`…apps.googleusercontent.com`) into the app's **Settings → Google OAuth Client ID**, save, then press **Connect Google Calendar**.
 
-Google will warn that the app is unverified. That's expected because it's your own unpublished app; click **Continue**. The only permission requested is `calendar.events` (read and create events).
+Google will warn that the app is unverified. That's expected because it's your own unpublished app; click **Continue**. Calendar asks only for `calendar.events` (read and create events).
+
+### 4. Log DBS spending automatically (optional, ~5 minutes)
+
+1. **Get an email for every payment.** In the DBS digibank app: **More → Manage Alerts**.
+   - **Cards:** set the alert threshold to **S$0.01** and tick **Email**.
+   - **Funds transfer / PayNow:** set the lowest threshold and tick **Email**.
+   - **PayLah!:** in the PayLah! app, turn on **Outgoing Payments** email alerts and set the lowest threshold.
+2. **Turn on the Gmail API** in the same Google Cloud project: **APIs & Services → Library → Gmail API → Enable**.
+3. In the app, open **Money → Connect Gmail & import**. The first import covers this month. After that, the app checks for new alerts every 10 minutes while it's open and unlocked. After you lock the app, tap **Import new DBS spending** once to reconnect.
+
+Recurring GIRO payments don't send alerts, so keep those under **Bills & subscriptions**. If a payee matches one of your bills, the app files it as "Already in Bills list" so it isn't counted twice.
 
 ### Run locally
 
@@ -88,6 +100,9 @@ css/styles.css        Mist Blue neumorphism styles (floating bottom nav on phone
 js/crypto.js          PBKDF2 + AES-GCM encryption
 js/store.js           Encrypted IndexedDB vault, backups
 js/gcal.js            Google Calendar (direct from browser) + .ics export
+js/gmail.js           Reads DBS alert emails from Gmail (DBS senders only, DMARC-verified)
+js/expenses.js        Parses DBS alerts, auto-categorises spending
+tests/                node tests/expenses.test.mjs
 js/views.js           Screens
 js/app.js             Lock screen, actions, reminders, morning brief, auto-lock
 js/util.js            Date and money helpers
