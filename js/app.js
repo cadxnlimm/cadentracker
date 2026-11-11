@@ -20,6 +20,7 @@ let cal = { connected: false, events: [], calendars: [], canList: false };
 let mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
 let sy = { status: 'off', lastSynced: 0, msg: '', again: false }; // sync between devices
 let syncTimer = null;
+let planSkips = {}; // "Another time" presses per to-do (this session only)
 
 // The Client ID isn't secret. A copy outside the encrypted vault lets a new device sign in before it has any data.
 function clientId() {
@@ -200,7 +201,7 @@ function render() {
   const html = {
     today: () => V.today(s, cal, mail, syncInfo()),
     money: () => V.moneyView(s, mail),
-    tasks: () => V.tasksView(s, cal),
+    tasks: () => V.tasksView(s, cal, { skips: planSkips }),
     training: () => V.trainingView(s, cal),
     calendar: () => V.calendarView(s, cal),
     settings: () => V.settingsView(s, notifPerm(), syncInfo()),
@@ -226,6 +227,8 @@ viewEl.addEventListener('focusout', () => { if (renderPending) setTimeout(() => 
 
 function go(view) {
   current = view;
+  // fresh calendar before suggesting free times
+  if (view === 'tasks' && gcal.isConnected() && Date.now() - (cal.fetchedAt || 0) > 5 * 60_000) refreshCalendar();
   render();
   viewEl.focus({ preventScroll: true });
   window.scrollTo(0, 0);
@@ -325,6 +328,7 @@ async function refreshCalendar() {
     cal.canList = gcal.canListCalendars();
     cal.calendars = await gcal.listCalendars().catch(() => cal.calendars);
     cal.events = await gcal.listEvents(from, new Date(from.getTime() + 7 * DAY), cal.calendars);
+    cal.fetchedAt = Date.now();
     cal.connected = true;
   } catch (err) {
     cal.connected = gcal.isConnected();
@@ -370,9 +374,10 @@ async function pushToCalendar(ev) {
   await ensureCalendar();
   if (!cal.calendars.length) cal.calendars = await gcal.listCalendars().catch(() => []);
   const target = targetCalendar(ev.calendarId);
-  await gcal.createEvent({ ...ev, calendarId: target.id });
+  const created = await gcal.createEvent({ ...ev, calendarId: target.id });
   toast(`Added to ${target.primary || target.id === 'primary' ? 'your main calendar' : target.name}${gcal.canListCalendars() ? '' : '. To choose another calendar, tap Allow on the Calendar tab.'}`);
   refreshCalendar();
+  return { eventId: created?.id || '', calendarId: target.id, calendarName: target.primary || target.id === 'primary' ? 'your main calendar' : target.name };
 }
 
 function safeName(s) {
@@ -468,6 +473,28 @@ viewEl.addEventListener('click', async (e) => {
       case 'task-toggle': { const t = find(s.tasks); t.done = el.checked; return commit(t.done ? 'Nice, done ✓' : null); }
       case 'task-del': s.tasks = s.tasks.filter((t) => t.id !== id); return commit('To-do deleted');
       case 'tasks-clear-done': s.tasks = s.tasks.filter((t) => !t.done); return commit();
+      case 'plan-other': planSkips[id] = (planSkips[id] || 0) + 1; return render();
+      case 'plan-book': {
+        const t = find(s.tasks);
+        const start = new Date(el.dataset.start), end = new Date(el.dataset.end);
+        let booked = { eventId: '', calendarId: '' };
+        if (clientId()) {
+          booked = await pushToCalendar({ title: t.title, description: t.notes || 'To-do from Caden Tracker', start, end, reminderMin: 10, calendarId: store.state.settings.planCalendarId || '' });
+        }
+        const tt = store.state.tasks.find((x) => x.id === id) || t; // (a sync may have swapped in fresh data)
+        tt.planned = { start: start.toISOString(), end: end.toISOString(), eventId: booked.eventId, calendarId: booked.calendarId };
+        delete planSkips[id];
+        return commit(clientId() ? `Booked ${fmtTime(start)}–${fmtTime(end)} ${V.dayWord(start)}` : `Planned for ${fmtTime(start)} ${V.dayWord(start)} (connect Google to add it to your calendar)`);
+      }
+      case 'task-unplan': {
+        const t = find(s.tasks);
+        const inGoogle = !!(t.planned?.eventId && t.planned.calendarId);
+        if (inGoogle) { await ensureCalendar(); await gcal.deleteEvent(t.planned.calendarId, t.planned.eventId); }
+        const tt = store.state.tasks.find((x) => x.id === id) || t;
+        delete tt.planned;
+        await commit(inGoogle ? 'Unbooked and removed from Google Calendar' : 'Unbooked');
+        return refreshCalendar();
+      }
       case 'task-gcal': return pushToCalendar(eventFromTask(find(s.tasks)));
       case 'task-ics': { const t = find(s.tasks); return download(`${safeName(t.title)}.ics`, gcal.icsFor(eventFromTask(t)), 'text/calendar'); }
       case 'income-del': s.income = s.income.filter((x) => x.id !== id); return commit();
@@ -520,6 +547,17 @@ viewEl.addEventListener('click', async (e) => {
 });
 
 viewEl.addEventListener('change', async (e) => {
+  if (e.target.dataset.act === 'task-mins') {
+    const t = store.state.tasks.find((x) => x.id === e.target.dataset.id);
+    if (!t) return;
+    t.mins = Number(e.target.value) || 30;
+    return commit();
+  }
+  if (e.target.dataset.act === 'plan-cal') {
+    if (!cal.calendars.some((c) => c.id === e.target.value)) return;
+    store.state.settings.planCalendarId = e.target.value;
+    return commit();
+  }
   if (e.target.dataset.act === 'training-cal') {
     const s = store.state;
     const t = s.trainings.find((x) => x.id === e.target.dataset.id);
@@ -573,7 +611,7 @@ viewEl.addEventListener('submit', async (e) => {
         return commit('Added for today');
 
       case 'task': {
-        const t = { id: store.uid(), title: f.title.trim(), due: f.due || '', notes: f.notes.trim(), done: false, remind: !!f.remind && !!f.due, notified: false };
+        const t = { id: store.uid(), title: f.title.trim(), due: f.due || '', notes: f.notes.trim(), done: false, remind: !!f.remind && !!f.due, notified: false, mins: num(f.mins) || 30 };
         s.tasks.push(t);
         await commit('To-do added');
         if (f.toCal && t.due) await pushToCalendar(eventFromTask(t));
@@ -661,6 +699,8 @@ viewEl.addEventListener('submit', async (e) => {
           currency: f.currency.toUpperCase(),
           morningHour: num(f.morningHour),
           autoLockMin: num(f.autoLockMin) || 10,
+          planStart: num(f.planStart),
+          planEnd: Math.max(num(f.planStart) + 1, num(f.planEnd) || 22),
           googleClientId: f.googleClientId.trim(),
         });
         rememberClientId(s.settings.googleClientId);

@@ -148,6 +148,10 @@ main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1100px; width: 100%
 .setup { margin-top: 14px; }
 .steps { padding-left: 20px; margin: 0 0 10px; display: grid; gap: 10px; font-size: .9rem; }
 .spaced { margin-top: 16px; }
+.sugg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+.inline-label { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: .85rem; }
+.booked { color: var(--accent); }
+@media (min-width: 761px) { .row.col.sugg { flex-direction: row; align-items: center; gap: 16px; } }
 .hint { font-weight: 400; font-size: .78rem; color: var(--muted); }
 .notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 16px; box-shadow: var(--inset-sm); font-size: .88rem; }
 .notice p { margin: 0; flex: 1 1 220px; }

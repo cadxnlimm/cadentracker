@@ -50,6 +50,7 @@ async function eventsIn(calendar, from, to) {
     start: e.start?.dateTime || e.start?.date,
     end: e.end?.dateTime || e.end?.date,
     allDay: !e.start?.dateTime,
+    free: e.transparency === 'transparent', // shown as "Free" in Google Calendar
     link: e.htmlLink,
     calendar: calendar.primary ? 'Main' : calendar.name || '',
     color: safeColor(calendar.color),
@@ -76,6 +77,13 @@ export function createEvent({ title, description = '', start, end, reminderMin =
       end: { dateTime: end.toISOString(), timeZone: tz },
       reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: reminderMin }] },
     }),
+  });
+}
+
+// Removes an event this app booked (e.g. when you un-book a to-do's time).
+export async function deleteEvent(calendarId, eventId) {
+  await google.authFetch(`${eventsUrl(calendarId)}/${encodeURIComponent(eventId)}`, { method: 'DELETE' }, 'Google Calendar').catch((err) => {
+    if (!/error 410|error 404/.test(err.message)) throw err; // already gone
   });
 }
 

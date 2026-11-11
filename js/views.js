@@ -1,5 +1,6 @@
 // Each view returns an HTML string. Every piece of user data passes through esc().
 import { CATEGORIES, NOT_SPENDING, GIVING } from './expenses.js';
+import { suggest, busyTimes } from './planner.js';
 import { esc, money, fmtDay, fmtDT, fmtTime, parseDay, parseDT, startOfDay, sameDay, isoDay, DAY, monthlyCost } from './util.js';
 
 const hasTime = (s) => !!s && s.length > 10;
@@ -67,14 +68,53 @@ function taskRow(t, { compact = false } = {}) {
     <div class="row-main">
       <div class="row-title">${esc(t.title)}</div>
       ${due ? `<div class="row-sub ${late ? 'late' : ''}">${t.remind ? '🔔 ' : ''}${esc(fmtDT(due, hasTime(t.due)))}</div>` : ''}
+      ${!t.done && t.planned ? `<div class="row-sub booked">${new Date(t.planned.end) < new Date() ? 'Booked time has passed' : 'Booked'} · ${esc(slotText(new Date(t.planned.start), new Date(t.planned.end)))}</div>` : ''}
       ${!compact && t.notes ? `<div class="row-note">${esc(t.notes)}</div>` : ''}
     </div>
     ${compact ? '' : `<div class="row-actions">
+      ${!t.done && t.planned && new Date(t.planned.end) > new Date() ? `<button class="btn-ghost sm" data-act="task-unplan" data-id="${esc(t.id)}" title="Remove the booked time">Unbook</button>` : ''}
       ${due ? `<button class="btn-ghost sm" data-act="task-gcal" data-id="${esc(t.id)}" title="Add to Google Calendar">+ Cal</button>
       <button class="btn-ghost sm" data-act="task-ics" data-id="${esc(t.id)}" title="Download calendar file">.ics</button>` : ''}
       <button class="btn-ghost sm danger" data-act="task-del" data-id="${esc(t.id)}" aria-label="Delete">✕</button>
     </div>`}
   </li>`;
+}
+
+export const dayWord = (d) => { const w = fmtDay(d); return w === 'Today' || w === 'Tomorrow' ? w.toLowerCase() : `on ${w}`; };
+const slotText = (a, b) => `${fmtDay(a)}, ${fmtTime(a)} – ${fmtTime(b)}`;
+const DURATIONS = [15, 30, 45, 60, 90, 120, 180];
+const durLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} hr${m > 60 ? 's' : ''}`.replace('1.5 hrs', '1½ hrs'));
+const hourLabel = (h) => `${String(h).padStart(2, '0')}:00`;
+
+// "Suggested times": a free slot in your calendar for each open to-do.
+function suggestionsCard(s, cal, plan) {
+  const st = s.settings;
+  const open = s.tasks.filter((t) => !t.done);
+  if (!open.length) return '';
+  const busy = busyTimes({ events: cal.connected ? cal.events : [], trainings: s.trainings, tasks: s.tasks });
+  const list = suggest(s.tasks, busy, { dayStart: Number(st.planStart ?? 9), dayEnd: Number(st.planEnd ?? 22), skips: plan.skips || {} });
+  const byId = Object.fromEntries(s.tasks.map((t) => [t.id, t]));
+  const calList = cal.calendars || [];
+  const bookInto = st.planCalendarId || st.calendarId;
+  return `<section class="card">
+    <div class="row-head"><h2>Suggested times</h2><span class="muted small">Free slots, ${esc(hourLabel(st.planStart ?? 9))}–${esc(hourLabel(st.planEnd ?? 22))}</span></div>
+    ${cal.connected ? '' : `<div class="notice"><p>Connect Google so suggestions avoid your calendar events. Right now they only avoid your trainings.</p>
+      ${st.googleClientId ? '<button type="button" class="btn-ghost sm" data-act="google-connect">Connect Google</button>' : ''}</div>`}
+    ${list.length ? `<ul class="list">${list.map((x) => {
+      const t = byId[x.taskId];
+      const mins = Number(t.mins) || 30;
+      return `<li class="row col sugg">
+        <div class="row-main"><div class="row-title">${esc(t.title)}</div>
+          <div class="row-sub ${x.late ? 'late' : ''}">${esc(slotText(x.start, x.end))}${x.late ? " · after it's due (no free time before)" : ''}</div></div>
+        <div class="sugg-actions">
+          <label class="sr-only" for="mins-${esc(t.id)}">How long ${esc(t.title)} takes</label>
+          <select class="sm-select" id="mins-${esc(t.id)}" data-act="task-mins" data-id="${esc(t.id)}">${DURATIONS.map((m) => `<option value="${m}" ${m === mins ? 'selected' : ''}>${esc(durLabel(m))}</option>`).join('')}</select>
+          <button type="button" class="btn-ghost sm" data-act="plan-other" data-id="${esc(t.id)}">Another time</button>
+          <button type="button" class="btn sm" data-act="plan-book" data-id="${esc(t.id)}" data-start="${esc(x.start.toISOString())}" data-end="${esc(x.end.toISOString())}">Book it</button>
+        </div></li>`;
+    }).join('')}</ul>` : empty(open.every((t) => t.planned && new Date(t.planned.end) > new Date()) ? 'Every open to-do has a booked time.' : 'No free time found in the next 7 days within your hours.')}
+    ${cal.connected && calList.length ? `<label class="inline-label">Book into<select class="sm-select" data-act="plan-cal">${calendarOptions(cal, bookInto)}</select></label>` : ''}
+  </section>`;
 }
 
 function trainingMini(t) {
@@ -383,7 +423,7 @@ export function moneyView(s, mail = {}) {
 }
 
 // ---------- TASKS ----------
-export function tasksView(s, cal) {
+export function tasksView(s, cal, plan = {}) {
   const open = s.tasks.filter((t) => !t.done);
   const dated = open.filter((t) => t.due).sort((a, b) => parseDT(a.due) - parseDT(b.due));
   const undated = open.filter((t) => !t.due);
@@ -394,13 +434,15 @@ export function tasksView(s, cal) {
       <label>What needs doing?<input name="title" required autocomplete="off"></label>
       <div class="field-row">
         <label>Due<input name="due" type="datetime-local"></label>
-        <label class="check-label"><input type="checkbox" name="remind" checked> Remind me</label>
+        <label>How long?<select name="mins">${DURATIONS.map((m) => `<option value="${m}" ${m === 30 ? 'selected' : ''}>${esc(durLabel(m))}</option>`).join('')}</select></label>
       </div>
+      <label class="check-label"><input type="checkbox" name="remind" checked> Remind me</label>
       <label>Notes<textarea name="notes" rows="2"></textarea></label>
       ${cal.connected ? `<label class="check-label"><input type="checkbox" name="toCal" checked> Also add to Google Calendar (so your phone reminds you even when this app is closed)</label>` : ''}
       <button class="btn">Add to-do</button>
     </form>
   </section>
+  ${suggestionsCard(s, cal, plan)}
   <section class="card"><h2>Upcoming</h2>${dated.length ? `<ul class="list">${dated.map((t) => taskRow(t)).join('')}</ul>` : empty('Nothing scheduled.')}</section>
   ${undated.length ? `<section class="card"><h2>Anytime</h2><ul class="list">${undated.map((t) => taskRow(t)).join('')}</ul></section>` : ''}
   ${done.length ? `<section class="card"><details><summary>Recently done (${done.length})</summary><ul class="list">${done.map((t) => taskRow(t)).join('')}</ul>
@@ -582,6 +624,8 @@ export function settingsView(s, perm, sync = null) {
       <div class="field-row three">
         <label>Currency<input name="currency" value="${esc(st.currency)}" maxlength="3" pattern="[A-Za-z]{3}" required></label>
         <label>Morning brief at<select name="morningHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${Number(st.morningHour) === h ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></label>
+        <label>Suggest to-do times from<select name="planStart">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${Number(st.planStart ?? 9) === h ? 'selected' : ''}>${hourLabel(h)}</option>`).join('')}</select></label>
+        <label>until<select name="planEnd">${Array.from({ length: 24 }, (_, h) => h + 1).map((h) => `<option value="${h}" ${Number(st.planEnd ?? 22) === h ? 'selected' : ''}>${hourLabel(h)}</option>`).join('')}</select></label>
         <label>Auto-lock after<select name="autoLockMin">${[1, 5, 10, 30, 60].map((m) => `<option value="${m}" ${Number(st.autoLockMin) === m ? 'selected' : ''}>${m} min idle</option>`).join('')}</select></label>
       </div>
       <label>Google OAuth Client ID <span class="muted small">(for Calendar, DBS spending import and sync; see README)</span><input name="googleClientId" value="${esc(st.googleClientId)}" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
