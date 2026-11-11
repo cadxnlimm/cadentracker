@@ -55,6 +55,7 @@ async function showLock() {
        <form data-lock="unlock" class="stack-form">
          <label>Passphrase<input name="pass" type="password" required autocomplete="current-password" autofocus></label>
          <button class="btn">Unlock</button>
+         ${google.autoConnectOn() && clientId() ? '<p class="muted small">Google (sync, Calendar, DBS import) reconnects automatically when you unlock.</p>' : ''}
        </form>`
     : `<h1>Set up your tracker</h1>
        <p class="muted">Choose a passphrase. It encrypts everything on this device. <strong>There is no reset:</strong> if you forget it, the data cannot be recovered by anyone.</p>
@@ -79,6 +80,8 @@ async function showLock() {
          </form>
        </details>`;
   lockBody.querySelector('input')?.focus();
+  // get Google's sign-in script ready, so reconnecting can happen inside the Unlock tap
+  if (exists && google.autoConnectOn() && clientId()) google.preload().catch(() => {});
 }
 
 // Load Google's sign-in script as soon as the option is opened, so the popup isn't blocked on submit.
@@ -89,6 +92,13 @@ lockBody.addEventListener('toggle', (e) => {
 lockBody.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
+  // Reconnect Google in the same tap as Unlock (browsers only allow Google's window right after a tap).
+  // You've allowed it before, so the window closes by itself. It runs alongside the passphrase check.
+  let autoGoogle = null;
+  if (form.dataset.lock === 'unlock' && google.autoConnectOn() && clientId()) {
+    autoGoogle = google.connect(clientId(), { silent: true });
+    autoGoogle.catch(() => {}); // handled after unlocking
+  }
   const btn = form.querySelector('button');
   const f = formData(form);
   btn.disabled = true;
@@ -116,7 +126,7 @@ lockBody.addEventListener('submit', async (e) => {
         throw new Error(err.message.includes('backup') ? err.message : 'Wrong passphrase for this backup');
       }
     }
-    enterApp();
+    enterApp(autoGoogle);
   } catch (err) {
     toast(err.message, true);
     btn.disabled = false;
@@ -124,15 +134,42 @@ lockBody.addEventListener('submit', async (e) => {
   }
 });
 
-function enterApp() {
+function enterApp(autoGoogle = null) {
   lockEl.hidden = true;
   appEl.hidden = false;
   lockBody.innerHTML = '';
   lastActivity = Date.now();
+  autoErr = '';
   render();
   startTicker();
-  if (google.isConnected()) afterConnect().catch((err) => toast(err.message, true));
+  if (clientId()) google.preload().catch(() => {});
+  if (autoGoogle) {
+    sy.status = sy.status === 'off' ? 'connecting' : sy.status;
+    autoGoogle
+      .then(() => {
+        cal.connected = gcal.isConnected(); mail.connected = gmail.isConnected();
+        if (sy.status === 'connecting') sy.status = 'off';
+        return afterConnect();
+      })
+      .catch((err) => { autoErr = err.message; if (sy.status === 'connecting') sy.status = 'off'; safeRender(); });
+  } else if (google.isConnected()) afterConnect().catch((err) => toast(err.message, true));
 }
+
+// ---------------- keeping Google connected ----------------
+// Google's access lasts about an hour. When it's nearly up, renew it on your next tap (it has to be a tap),
+// silently, so syncing and imports carry on.
+let autoErr = '';
+let lastRenewTry = 0;
+window.addEventListener('pointerdown', () => {
+  if (!store.isUnlocked() || !google.autoConnectOn() || !clientId()) return;
+  const wasOn = google.isConnected() || sy.lastSynced || cal.connected || mail.connected;
+  if (!wasOn || google.msLeft() > 5 * 60_000 || Date.now() - lastRenewTry < 5 * 60_000) return;
+  lastRenewTry = Date.now();
+  const wasExpired = !google.isConnected();
+  google.connect(clientId(), { silent: true })
+    .then(() => { cal.connected = gcal.isConnected(); mail.connected = gmail.isConnected(); autoErr = ''; if (wasExpired) return afterConnect(); })
+    .catch((err) => { autoErr = err.message; safeRender(); });
+}, { capture: true, passive: true });
 
 async function doLock() {
   // send any unsynced change first
@@ -171,7 +208,7 @@ function render() {
   document.querySelectorAll('.nav [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === current));
 }
 
-const syncInfo = () => ({ ...sy, google: google.isConnected(), drive: sync.isConnected() });
+const syncInfo = () => ({ ...sy, google: google.isConnected(), drive: sync.isConnected(), auto: google.autoConnectOn(), autoErr });
 
 // Re-render unless you're in the middle of typing (a background sync shouldn't wipe a half-filled form).
 let renderPending = false;

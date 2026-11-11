@@ -101,6 +101,7 @@ function stat(label, value, cls = '') {
 function syncChip(sync) {
   if (!sync) return '';
   if (sync.status === 'syncing') return `<span class="chip"><span class="pulse" aria-hidden="true"></span>Syncing…</span>`;
+  if (sync.status === 'connecting') return `<span class="chip"><span class="pulse" aria-hidden="true"></span>Connecting to Google…</span>`;
   if (sync.status === 'ok' && sync.drive) return `<span class="chip"><span class="dot dot-ok" aria-hidden="true"></span>Synced ${esc(fmtTime(new Date(sync.lastSynced)))}</span>`;
   return '';
 }
@@ -117,9 +118,11 @@ function syncBanner(s, sync) {
     return `<section class="card banner"><div><h2>Sync didn't finish</h2><p class="muted">${esc(sync.msg)}</p></div>
       <button class="btn-ghost" data-act="sync-now">Try again</button></section>`;
   }
+  if (sync.status === 'connecting' && !sync.google) return '';
   if (!sync.google && (s.settings.syncEnabled || s.settings.googleClientId)) {
+    const why = sync.auto ? (sync.autoErr ? `Couldn't reconnect automatically: ${esc(sync.autoErr)}` : 'Not connected right now.') : '';
     return `<section class="card banner"><div><h2>${s.settings.syncEnabled ? 'Sync with your other devices' : 'Connect Google'}</h2>
-      <p class="muted">One tap ${s.settings.syncEnabled ? 'syncs your phone and laptop, ' : ''}imports new DBS spending and shows your calendar. Needed once each time you unlock.</p></div>
+      <p class="muted">${why ? `${why} ` : ''}One tap ${s.settings.syncEnabled ? 'syncs your phone and laptop, ' : ''}imports new DBS spending and shows your calendar.${sync.auto ? '' : ' After this, it reconnects by itself whenever you unlock.'}</p></div>
       <button class="btn" data-act="google-connect">Connect Google</button></section>`;
   }
   return '';
@@ -470,7 +473,7 @@ export function calendarView(s, cal) {
       <button class="btn" data-act="goto" data-view="settings">Add Client ID in Settings</button></section>`;
   } else if (!cal.connected) {
     body = `<section class="card"><h2>Google Calendar</h2>
-      <p class="muted">One Google sign-in covers Calendar, DBS spending import and sync. It lasts about an hour and is never saved to disk; after locking the app, tap Connect again.</p>
+      <p class="muted">One Google sign-in covers Calendar, DBS spending import and sync. After the first time, it reconnects by itself when you unlock.</p>
       <button class="btn" data-act="gcal-connect">Connect Google</button></section>`;
   } else {
     const days = {};

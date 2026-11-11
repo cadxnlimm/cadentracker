@@ -34,7 +34,8 @@ Turn on **Settings → Sync between devices** and your phone and laptop share th
 
 - **End-to-end encrypted.** The whole vault is encrypted with your passphrase *before* it leaves the device, then saved as one file in your Google Drive's hidden **app folder** (`drive.appdata`). Google stores only unreadable data. The app can't see any of your other Drive files, and the folder doesn't appear in your Drive.
 - **Same account = same Google account + same passphrase.** On a new device, open the app and choose **"Already use it on another device? Get your data"** on the first screen.
-- **Automatic while the app is open.** Changes are sent a second or two after you make them, and fetched every 2 minutes and whenever you switch back to the app. After the app locks, tap **Connect Google** once to resume (one sign-in covers sync, Calendar and DBS import).
+- **Automatic while the app is open.** Changes are sent a second or two after you make them, and fetched every 2 minutes and whenever you switch back to the app.
+- **Google reconnects by itself when you unlock.** After you've connected once, pressing **Unlock** also reconnects Google: its sign-in window opens and closes on its own, then sync, Calendar and DBS import start. (Google only gives apps without a server about an hour of access at a time, and only lets its window open right after a tap, so the app renews on your next tap when the hour is nearly up.) If your browser blocks pop-ups for the site, allow them once. **Disconnect Google** in Settings turns this off.
 - **Changes from both devices are combined**, item by item. Things added on either side are kept, deletions carry over, and if the exact same item was edited on both devices before they synced, the device that syncs last keeps its version. A DBS alert imported on both devices is kept once.
 - **Changing your passphrase** on one device re-encrypts the synced copy; your other devices ask for the new passphrase once.
 
