@@ -408,7 +408,16 @@ export function tasksView(s, cal) {
 }
 
 // ---------- TRAINING ----------
-export function trainingView(s) {
+// Options for a calendar <select>: your calendars, main one first, `chosen` selected (else the main one).
+function calendarOptions(cal, chosen) {
+  const list = cal.calendars || [];
+  const pick = list.some((c) => c.id === chosen) ? chosen : (list.find((c) => c.primary) || list[0])?.id;
+  return list.map((c) => `<option value="${esc(c.id)}" ${c.id === pick ? 'selected' : ''}>${esc(c.primary ? `${c.name} (main)` : c.name)}</option>`).join('');
+}
+
+export function trainingView(s, cal = {}) {
+  const calOk = cal.connected && (cal.calendars || []).length > 0;
+  const trainingDefault = s.settings.trainingCalendarId || s.settings.calendarId;
   const list = [...s.trainings].sort((a, b) => (a.nextSession || '9999').localeCompare(b.nextSession || '9999'));
   return `<header class="page-head"><h1>Training tracker</h1></header>
   <section class="card">
@@ -424,6 +433,7 @@ export function trainingView(s) {
         <label>Next session<input name="nextSession" type="datetime-local"></label>
       </div>
       <label>Notes<textarea name="notes" rows="2"></textarea></label>
+      ${calOk ? `<label>Google Calendar for its sessions<select name="calendarId">${calendarOptions(cal, trainingDefault)}</select></label>` : ''}
       <button class="btn">Add training</button>
     </form></details>
   </section>
@@ -447,6 +457,8 @@ export function trainingView(s) {
           <button class="btn">Save & move to lesson ${esc(cur + 1)}</button>
         </form></details>`}
       <div class="row-actions wrap">
+        ${next && calOk ? `<label class="sr-only" for="tcal-${esc(t.id)}">Google Calendar for ${esc(t.name)}</label>
+        <select class="sm-select" id="tcal-${esc(t.id)}" data-act="training-cal" data-id="${esc(t.id)}" title="Which Google calendar this training's sessions go to">${calendarOptions(cal, t.calendarId || trainingDefault)}</select>` : ''}
         ${next ? `<button class="btn-ghost sm" data-act="training-gcal" data-id="${esc(t.id)}">+ Google Cal</button>
         <button class="btn-ghost sm" data-act="training-ics" data-id="${esc(t.id)}">.ics</button>` : ''}
         <details class="inline"><summary class="btn-ghost sm">Reschedule</summary>

@@ -201,7 +201,7 @@ function render() {
     today: () => V.today(s, cal, mail, syncInfo()),
     money: () => V.moneyView(s, mail),
     tasks: () => V.tasksView(s, cal),
-    training: () => V.trainingView(s),
+    training: () => V.trainingView(s, cal),
     calendar: () => V.calendarView(s, cal),
     settings: () => V.settingsView(s, notifPerm(), syncInfo()),
   }[current]();
@@ -351,6 +351,8 @@ function eventFromTraining(t) {
     title: `${t.name}: Lesson ${t.currentLesson}${t.totalLessons ? `/${t.totalLessons}` : ''}`,
     description: [t.trainees && `Group: ${t.trainees}`, t.notes].filter(Boolean).join('\n') || 'From Caden Tracker',
     start, end: new Date(start.getTime() + 60 * 60000), reminderMin: 60,
+    // this training's own calendar, else the one last picked on the Training tab, else the Calendar tab's
+    calendarId: t.calendarId || store.state.settings.trainingCalendarId || '',
   };
 }
 
@@ -506,6 +508,15 @@ viewEl.addEventListener('click', async (e) => {
 });
 
 viewEl.addEventListener('change', async (e) => {
+  if (e.target.dataset.act === 'training-cal') {
+    const s = store.state;
+    const t = s.trainings.find((x) => x.id === e.target.dataset.id);
+    if (!t || !cal.calendars.some((c) => c.id === e.target.value)) return;
+    t.calendarId = e.target.value;
+    s.settings.trainingCalendarId = e.target.value;
+    const c = cal.calendars.find((x) => x.id === t.calendarId);
+    return commit(`${t.name} will go to ${c.primary ? 'your main calendar' : c.name}`);
+  }
   if (e.target.dataset.act === 'exp-cat') {
     const s = store.state;
     const x = s.expenses.find((ex) => ex.id === e.target.dataset.id);
@@ -600,7 +611,9 @@ viewEl.addEventListener('submit', async (e) => {
         s.trainings.push({
           id: store.uid(), name: f.name.trim(), trainees: f.trainees.trim(), totalLessons: f.totalLessons ? num(f.totalLessons) : '',
           currentLesson: num(f.currentLesson) || 1, nextSession: f.nextSession || '', notes: f.notes.trim(), log: [], notifiedFor: '',
+          calendarId: f.calendarId || '',
         });
+        if (f.calendarId) s.settings.trainingCalendarId = f.calendarId;
         return commit('Training added');
 
       case 'lesson-done': {
