@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; connect-src 'self' https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; img-src 'self' data:; base-uri 'none'; form-action 'self'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#14161c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tracker">
+  <title>Caden Tracker</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- Lock screen: nothing below is readable until the passphrase decrypts it -->
+  <section id="lock" class="lock" hidden>
+    <div class="lock-card">
+      <div class="brand"><img src="icons/icon.svg" alt="" width="40" height="40"><span>Caden Tracker</span></div>
+      <div id="lock-body"></div>
+      <p class="lock-foot">Your data is encrypted on this device. Nobody else, including the app's host, can read it.</p>
+    </div>
+  </section>
+
+  <div id="app" class="app" hidden>
+    <nav class="nav" aria-label="Sections">
+      <div class="brand nav-brand"><img src="icons/icon.svg" alt="" width="28" height="28"><span>Tracker</span></div>
+      <button data-view="today" class="active"><span class="ico">☀</span><span>Today</span></button>
+      <button data-view="money"><span class="ico">$</span><span>Money</span></button>
+      <button data-view="tasks"><span class="ico">✓</span><span>To-dos</span></button>
+      <button data-view="training"><span class="ico">▲</span><span>Training</span></button>
+      <button data-view="calendar"><span class="ico">▦</span><span>Calendar</span></button>
+      <button data-view="settings"><span class="ico">⚙</span><span>Settings</span></button>
+    </nav>
+    <main id="view" tabindex="-1"></main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
