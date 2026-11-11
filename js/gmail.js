@@ -2,55 +2,16 @@
 // - Only messages from DBS's alert addresses are ever requested (see SENDERS / the search query).
 // - Each one must pass Google's DMARC check for dbs.com, so a fake "DBS" email can't add expenses.
 // - Emails are parsed in memory; only the amount, payee, date and how you paid are kept (encrypted).
-// - The access token lives in memory only and expires within the hour.
-import { loadGis } from './gcal.js';
+// - Sign-in is shared with the rest of the app (see google.js); the token lives in memory only.
+import * as google from './google.js';
 
-const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const API = 'https://www.googleapis.com/gmail/v1/users/me/messages';
 export const SENDERS = ['ibanking.alert@dbs.com', 'paylah.alert@dbs.com'];
 
-let token = null;
-let tokenExpiry = 0;
-
-export const isConnected = () => !!token && Date.now() < tokenExpiry;
-
-export async function connect(clientId) {
-  if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
-  await loadGis();
-  return new Promise((resolve, reject) => {
-    const client = google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: SCOPE,
-      callback: (resp) => {
-        if (resp.error) return reject(new Error(resp.error_description || resp.error));
-        if (!google.accounts.oauth2.hasGrantedAllScopes(resp, SCOPE)) return reject(new Error('Gmail access was not allowed'));
-        token = resp.access_token;
-        tokenExpiry = Date.now() + (Number(resp.expires_in) - 60) * 1000;
-        resolve();
-      },
-      error_callback: (e) => reject(new Error(e?.message || 'Google sign-in was cancelled')),
-    });
-    client.requestAccessToken();
-  });
-}
-
-export function disconnect() {
-  if (token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(token, () => {});
-  forget();
-}
-
-export function forget() {
-  token = null;
-  tokenExpiry = 0;
-}
+export const isConnected = () => google.has('gmail');
 
 async function call(url) {
-  if (!isConnected()) throw new Error('Gmail is not connected');
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 401) { forget(); throw new Error('Gmail session expired. Connect again.'); }
-  if (res.status === 403) throw new Error('Gmail refused access. Is the Gmail API enabled in your Google Cloud project?');
-  if (!res.ok) throw new Error(`Gmail error ${res.status}`);
-  return res.json();
+  return (await google.authFetch(url, {}, 'Gmail')).json();
 }
 
 // IDs of DBS alert emails received after `afterSec` (unix seconds), oldest first.

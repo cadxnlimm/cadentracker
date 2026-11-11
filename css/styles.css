@@ -148,6 +148,11 @@ main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1100px; width: 100%
 .setup { margin-top: 14px; }
 .steps { padding-left: 20px; margin: 0 0 10px; display: grid; gap: 10px; font-size: .9rem; }
 .spaced { margin-top: 16px; }
+.head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 8px; font-size: .8rem; font-weight: 600; color: var(--muted); padding: 7px 12px; border-radius: 99px; box-shadow: var(--inset-sm); white-space: nowrap; }
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.banner h2 { margin-bottom: .3em; }
+.banner p { margin: 0; }
 .stats.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .progress.thin { height: 10px; margin-top: 6px; }
 .progress span.alt { background: var(--save); }

@@ -97,8 +97,36 @@ function stat(label, value, cls = '') {
   return `<div class="stat ${cls}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${esc(value)}</div></div>`;
 }
 
+// ---------- sync status ----------
+function syncChip(sync) {
+  if (!sync) return '';
+  if (sync.status === 'syncing') return `<span class="chip"><span class="pulse" aria-hidden="true"></span>Syncing…</span>`;
+  if (sync.status === 'ok' && sync.drive) return `<span class="chip"><span class="dot dot-ok" aria-hidden="true"></span>Synced ${esc(fmtTime(new Date(sync.lastSynced)))}</span>`;
+  return '';
+}
+
+// Shown on Today when this device isn't signed in to Google, or sync needs attention.
+function syncBanner(s, sync) {
+  if (!sync) return '';
+  if (sync.status === 'needs-pass') {
+    return `<section class="card banner"><div><h2>Your other device changed the passphrase</h2>
+      <p class="muted">Enter it once to keep syncing. This device will use it too.</p></div>
+      <button class="btn" data-act="sync-now">Enter passphrase &amp; sync</button></section>`;
+  }
+  if (sync.status === 'error' && sync.drive) {
+    return `<section class="card banner"><div><h2>Sync didn't finish</h2><p class="muted">${esc(sync.msg)}</p></div>
+      <button class="btn-ghost" data-act="sync-now">Try again</button></section>`;
+  }
+  if (!sync.google && (s.settings.syncEnabled || s.settings.googleClientId)) {
+    return `<section class="card banner"><div><h2>${s.settings.syncEnabled ? 'Sync with your other devices' : 'Connect Google'}</h2>
+      <p class="muted">One tap ${s.settings.syncEnabled ? 'syncs your phone and laptop, ' : ''}imports new DBS spending and shows your calendar. Needed once each time you unlock.</p></div>
+      <button class="btn" data-act="google-connect">Connect Google</button></section>`;
+  }
+  return '';
+}
+
 // ---------- TODAY (morning brief) ----------
-export function today(s, cal, mail = {}) {
+export function today(s, cal, mail = {}, sync = null) {
   const u = upcoming(s);
   const m = monthSummary(s);
   const cur = s.settings.currency;
@@ -106,8 +134,9 @@ export function today(s, cal, mail = {}) {
   const greet = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   const todayEvents = (cal.events || []).filter((e) => sameDay(new Date(e.start), new Date()));
 
-  return `<header class="page-head"><div><p class="eyebrow">${esc(new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))}</p>
-    <h1>${greet}, Caden</h1></div></header>
+  return `<header class="page-head head-row"><div><p class="eyebrow">${esc(new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))}</p>
+    <h1>${greet}, Caden</h1></div>${syncChip(sync)}</header>
+  ${syncBanner(s, sync)}
 
   <div class="grid-2">
     <section class="card">
@@ -148,7 +177,7 @@ export function today(s, cal, mail = {}) {
       ${stat('Spent so far', money(m.spent, cur))}
       ${stat('Left to spend', money(m.left, cur), m.left < 0 ? 'neg' : 'pos')}
     </div>
-    ${s.settings.googleClientId && !mail.connected ? `<div class="btn-row spaced"><button class="btn-ghost sm" data-act="gmail-sync">Import new DBS spending</button></div>` : ''}
+
   </section>`;
 }
 
@@ -192,7 +221,7 @@ function spendingCard(s, m, mail) {
   } else if (mail.connected) {
     sync = `<p class="sync-line"><span class="dot dot-ok" aria-hidden="true"></span>Auto-importing from DBS emails while the app is open${last ? ` · last checked ${esc(fmtTime(last))}` : ''}</p>
       ${mail.note ? `<p class="muted small">${esc(mail.note)}</p>` : ''}
-      <div class="btn-row"><button class="btn-ghost sm" data-act="gmail-sync">Check now</button><button class="btn-ghost sm" data-act="gmail-disconnect">Disconnect Gmail</button></div>`;
+      <div class="btn-row"><button class="btn-ghost sm" data-act="gmail-sync">Check now</button><button class="btn-ghost sm" data-act="google-disconnect">Disconnect Google</button></div>`;
   } else {
     sync = `<p class="muted">${last ? `Last imported ${esc(fmtDT(last))}. ` : ''}Your DBS alert emails become expenses automatically. Nothing to type.</p>
       <button class="btn" data-act="gmail-sync">${last ? 'Import new DBS spending' : 'Connect Gmail & import'}</button>
@@ -441,8 +470,8 @@ export function calendarView(s, cal) {
       <button class="btn" data-act="goto" data-view="settings">Add Client ID in Settings</button></section>`;
   } else if (!cal.connected) {
     body = `<section class="card"><h2>Google Calendar</h2>
-      <p class="muted">Sign-in lasts about an hour and is never saved to disk. You'll reconnect after locking the app.</p>
-      <button class="btn" data-act="gcal-connect">Connect Google Calendar</button></section>`;
+      <p class="muted">One Google sign-in covers Calendar, DBS spending import and sync. It lasts about an hour and is never saved to disk; after locking the app, tap Connect again.</p>
+      <button class="btn" data-act="gcal-connect">Connect Google</button></section>`;
   } else {
     const days = {};
     for (const e of cal.events) {
@@ -450,7 +479,7 @@ export function calendarView(s, cal) {
       (days[k] ||= []).push(e);
     }
     body = `<section class="card"><div class="row-head"><h2>Next 7 days</h2>
-        <div><button class="btn-ghost sm" data-act="gcal-refresh">Refresh</button> <button class="btn-ghost sm" data-act="gcal-disconnect">Disconnect</button></div></div>
+        <div><button class="btn-ghost sm" data-act="gcal-refresh">Refresh</button> <button class="btn-ghost sm" data-act="google-disconnect">Disconnect Google</button></div></div>
       ${Object.keys(days).length ? Object.entries(days).map(([k, evs]) => `<h3>${esc(fmtDay(parseDay(k)))}</h3><ul class="list">${evs.map((e) => `<li class="row"><div class="dot dot-cal"></div><div class="row-main">
         <div class="row-title">${esc(e.title)}</div><div class="row-sub">${e.allDay ? 'All day' : `${esc(fmtTime(new Date(e.start)))} – ${esc(fmtTime(new Date(e.end)))}`}</div></div></li>`).join('')}</ul>`).join('') : empty('Nothing on your calendar this week.')}
     </section>`;
@@ -476,7 +505,37 @@ export function calendarView(s, cal) {
 }
 
 // ---------- SETTINGS ----------
-export function settingsView(s, perm) {
+function syncCard(s, sync) {
+  const on = s.settings.syncEnabled;
+  let body;
+  if (!s.settings.googleClientId) {
+    body = `<p class="muted">Add your Google OAuth Client ID above first.</p>`;
+  } else if (sync?.drive) {
+    body = `<p class="sync-line">${sync.status === 'syncing' ? '<span class="pulse" aria-hidden="true"></span>Syncing…'
+      : sync.status === 'ok' ? `<span class="dot dot-ok" aria-hidden="true"></span>Synced ${esc(fmtDT(new Date(sync.lastSynced)))}. Changes sync automatically while the app is open.`
+      : sync.status === 'error' ? `Last sync failed: ${esc(sync.msg)}` : sync.status === 'needs-pass' ? 'Waiting for the passphrase from your other device.' : 'Connected.'}</p>
+      <div class="btn-row"><button class="btn-ghost sm" data-act="sync-now">Sync now</button>
+      <button class="btn-ghost sm" data-act="google-disconnect">Disconnect Google</button>
+      ${on ? '<button class="btn-ghost sm danger" data-act="sync-off">Turn off sync</button>' : ''}</div>`;
+  } else {
+    body = `<p class="muted">${on ? 'Sync is on. Connect Google to send and fetch changes.' : 'Keep your phone and laptop in step using your own Google account.'}</p>
+      <button class="btn" data-act="google-connect">${on ? 'Connect Google & sync' : 'Turn on sync'}</button>`;
+  }
+  return `<section class="card"><h2>Sync between devices</h2>
+    ${body}
+    <details class="setup"><summary class="muted">How it works &amp; setting up a new device</summary>
+      <ul class="steps">
+        <li>Your data is encrypted with your passphrase <strong>before</strong> it leaves this device, then kept in a hidden app-only folder in your Google Drive. Google stores only unreadable data, and the app can't see your other Drive files.</li>
+        <li>One-time setup: in your Google Cloud project, enable the <strong>Google Drive API</strong> (APIs &amp; Services → Library).</li>
+        <li><strong>New device:</strong> open the app, and on the first screen choose <em>"Already use it on another device? Get your data"</em>. Sign in with the same Google account and enter your passphrase.</li>
+        <li>All your devices use the same passphrase. If you change it on one, the others will ask for the new one once.</li>
+        <li>Changes made on both devices are combined. If the exact same item was edited on both before syncing, the latest device to sync keeps its version.</li>
+      </ul>
+    </details>
+  </section>`;
+}
+
+export function settingsView(s, perm, sync = null) {
   const st = s.settings;
   return `<header class="page-head"><h1>Settings</h1></header>
   <section class="card"><h2>General</h2>
@@ -486,10 +545,12 @@ export function settingsView(s, perm) {
         <label>Morning brief at<select name="morningHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${Number(st.morningHour) === h ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></label>
         <label>Auto-lock after<select name="autoLockMin">${[1, 5, 10, 30, 60].map((m) => `<option value="${m}" ${Number(st.autoLockMin) === m ? 'selected' : ''}>${m} min idle</option>`).join('')}</select></label>
       </div>
-      <label>Google OAuth Client ID <span class="muted small">(for Calendar and DBS spending import; see README)</span><input name="googleClientId" value="${esc(st.googleClientId)}" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
+      <label>Google OAuth Client ID <span class="muted small">(for Calendar, DBS spending import and sync; see README)</span><input name="googleClientId" value="${esc(st.googleClientId)}" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
       <button class="btn">Save settings</button>
     </form>
   </section>
+
+  ${syncCard(s, sync)}
 
   <section class="card"><h2>Notifications</h2>
     <p class="muted">Reminders and the morning brief pop up while the app is open and unlocked. For reminders when the app is closed, tick "Also add to Google Calendar" on a to-do, and your phone's calendar will notify you.</p>
@@ -499,10 +560,10 @@ export function settingsView(s, perm) {
     ${perm === 'denied' ? '<p class="muted">Notifications are blocked. Allow them in your browser or phone settings for this site.</p>' : ''}
   </section>
 
-  <section class="card"><h2>Phone ↔ laptop</h2>
-    <p class="muted">Your data lives only on the device you entered it on. To move it, export an encrypted backup on one device and import it on the other. The file is unreadable without your passphrase, so it's safe to send via AirDrop, a USB drive or your own cloud storage.</p>
+  <section class="card"><h2>Backup file</h2>
+    <p class="muted">An encrypted copy of everything, as a file. It's unreadable without your passphrase, so it's safe to keep anywhere. Useful as a backup even with sync on.</p>
     <div class="btn-row">
-      <button class="btn" data-act="export">Export encrypted backup</button>
+      <button class="btn-ghost" data-act="export">Export encrypted backup</button>
       <label class="btn-ghost file-btn">Import backup<input type="file" accept=".ctbackup,application/json" data-act="import" hidden></label>
     </div>
   </section>

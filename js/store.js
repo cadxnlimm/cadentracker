@@ -1,5 +1,5 @@
 // Encrypted vault kept in this browser's IndexedDB. Only ciphertext is ever written to disk.
-import { deriveKey, encryptJSON, decryptJSON, randomBytes, saltOf, ITERATIONS } from './crypto.js';
+import { deriveKey, encryptJSON, decryptJSON, randomBytes, saltOf, b64, ITERATIONS } from './crypto.js';
 
 const DB_NAME = 'cadentracker';
 const STORE = 'vault';
@@ -128,3 +128,46 @@ export async function wipe() {
 }
 
 export const uid = () => crypto.randomUUID();
+
+// ---------- sync ----------
+// The synced copy is your data minus __syncBase (the last copy both devices agreed on, kept per device),
+// encrypted with the same passphrase-derived key as this vault.
+export function syncPayload() {
+  const { __syncBase, ...rest } = state;
+  return JSON.parse(JSON.stringify(rest));
+}
+export const syncBase = () => state.__syncBase || null;
+export function setSyncBase(data) { state.__syncBase = JSON.parse(JSON.stringify(data)); }
+export function replaceState(next) { state = { ...next, __syncBase: state.__syncBase }; }
+
+export const sealForSync = (obj) => encryptJSON(key, salt, iterations, obj);
+
+// Decrypts the synced copy with this device's key. If it was locked with a different passphrase
+// (e.g. changed on your other device, or this device was set up separately), throws code NEEDS_PASS.
+export async function openSynced(blob) {
+  if (!blob?.data || blob.salt !== b64(salt) || blob.iterations !== iterations) {
+    throw Object.assign(new Error('Passphrase needed for your synced data'), { code: 'NEEDS_PASS' });
+  }
+  return decryptJSON(key, blob);
+}
+
+// Unlocks the synced copy with `passphrase` and switches this device to that passphrase.
+export async function adoptSynced(blob, passphrase) {
+  const s = saltOf(blob);
+  const k = await deriveKey(passphrase, s, blob.iterations);
+  const data = await decryptJSON(k, blob); // throws if the passphrase is wrong
+  salt = s;
+  iterations = blob.iterations;
+  key = k;
+  return data;
+}
+
+// New device: start from the synced copy.
+export async function createFromSynced(blob, passphrase) {
+  const data = await adoptSynced(blob, passphrase);
+  const base = emptyState();
+  state = { ...base, ...data, settings: { ...base.settings, ...(data.settings || {}) } };
+  state.__syncBase = JSON.parse(JSON.stringify(data));
+  migrate();
+  await save();
+}

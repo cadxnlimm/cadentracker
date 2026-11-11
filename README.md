@@ -23,13 +23,22 @@ It's a web app you can install on your phone's home screen and also open on your
 - **Strict Content-Security-Policy.** The page can only run its own scripts and talk to Google's Calendar API. It can't send data anywhere else.
 - **Google Calendar is opt-in.** Google's sign-in script only loads when you press *Connect*. Calls go straight from your browser to Google. The access token lives in memory only and expires within an hour. Events you put in Google Calendar are, of course, stored by Google.
 - **DBS spending import is opt-in and read-only.** When you press *Connect Gmail & import*, the app asks Gmail (straight from your device) only for emails from `ibanking.alert@dbs.com` and `paylah.alert@dbs.com`. Each email must pass the DMARC check that Google's own mail servers stamped on it for `dbs.com`, so a fake "DBS" email can't add expenses. The email is read in memory and only the amount, payee, date and payment type are kept, encrypted. No bank login, no aggregator, no server. Google's consent screen says "read your email" because Gmail has no narrower permission; the app's code only ever searches for those two senders.
+- **Sync is end-to-end encrypted** (see "Phone ↔ laptop" below). Google holds only ciphertext in an app-only folder.
 - **No recovery.** If you forget your passphrase, nobody can recover the data, including you. Export a backup now and then.
 
 > Code vs data: it's fine for this repo to be public because it holds **only code**, never your data. If you'd rather keep the code private too, see "Hosting from a private repo" below.
 
-## Phone ↔ laptop
+## Phone ↔ laptop: sync with your Google account
 
-Each device keeps its own encrypted copy. To move data, open **Settings → Export encrypted backup** on one device and **Import backup** on the other. The `.ctbackup` file can't be read without your passphrase, so AirDrop, a USB drive or your own cloud storage are all fine.
+Turn on **Settings → Sync between devices** and your phone and laptop share the same data.
+
+- **End-to-end encrypted.** The whole vault is encrypted with your passphrase *before* it leaves the device, then saved as one file in your Google Drive's hidden **app folder** (`drive.appdata`). Google stores only unreadable data. The app can't see any of your other Drive files, and the folder doesn't appear in your Drive.
+- **Same account = same Google account + same passphrase.** On a new device, open the app and choose **"Already use it on another device? Get your data"** on the first screen.
+- **Automatic while the app is open.** Changes are sent a second or two after you make them, and fetched every 2 minutes and whenever you switch back to the app. After the app locks, tap **Connect Google** once to resume (one sign-in covers sync, Calendar and DBS import).
+- **Changes from both devices are combined**, item by item. Things added on either side are kept, deletions carry over, and if the exact same item was edited on both devices before they synced, the device that syncs last keeps its version. A DBS alert imported on both devices is kept once.
+- **Changing your passphrase** on one device re-encrypts the synced copy; your other devices ask for the new passphrase once.
+
+You can still **Export encrypted backup** as a file at any time.
 
 ## Reminders: what to expect
 
@@ -56,19 +65,19 @@ The page is public but shows nothing except a lock screen. Your data is only eve
 
 On first launch, create your passphrase.
 
-### 3. Connect Google Calendar (optional, ~5 minutes)
+### 3. Connect Google: Calendar, DBS import and sync (optional, ~5 minutes)
 
 The app uses your **own** Google Cloud OAuth client, so no third-party app ever sits between you and your calendar.
 
 1. Go to <https://console.cloud.google.com/> and create a project (e.g. "Caden Tracker").
-2. **APIs & Services → Library** → search **Google Calendar API** → **Enable**.
+2. **APIs & Services → Library** → enable **Google Calendar API**, **Gmail API** and **Google Drive API** (Drive is for sync).
 3. **Google Auth Platform → Branding / Audience** (the "OAuth consent screen"): choose **External**, fill in the app name and your email. Leave it in **Testing** and add your own Gmail under **Test users**.
 4. **Google Auth Platform → Clients → Create client** → **Web application**. Under **Authorised JavaScript origins** add:
    - `https://cadxnlimm.github.io`
    - `http://localhost:8000` (only if you'll run it locally)
-5. Copy the **Client ID** (`…apps.googleusercontent.com`) into the app's **Settings → Google OAuth Client ID**, save, then press **Connect Google Calendar**.
+5. Copy the **Client ID** (`…apps.googleusercontent.com`) into the app's **Settings → Google OAuth Client ID**, save, then press **Settings → Sync between devices → Turn on sync**. (Optional: put the Client ID in `js/config.js` so a new device doesn't need it typed in. It isn't secret.)
 
-Google will warn that the app is unverified. That's expected because it's your own unpublished app; click **Continue**. Calendar asks only for `calendar.events` (read and create events).
+Google will warn that the app is unverified. That's expected because it's your own unpublished app; click **Continue** and allow all three: `calendar.events` (read and add events), `gmail.readonly` (used only to find DBS alert emails) and `drive.appdata` (the hidden sync folder only).
 
 ### 4. Log DBS spending automatically (optional, ~5 minutes)
 
@@ -99,10 +108,14 @@ index.html            App shell + Content-Security-Policy
 css/styles.css        Mist Blue neumorphism styles (floating bottom nav on phone, sidebar on laptop)
 js/crypto.js          PBKDF2 + AES-GCM encryption
 js/store.js           Encrypted IndexedDB vault, backups
+js/google.js          One Google sign-in shared by Calendar, Gmail and sync (token in memory only)
+js/sync.js            Encrypted vault file in Google Drive's hidden app folder
+js/merge.js           Combines changes from two devices (3-way merge)
+js/config.js          Optional Google Client ID for new devices
 js/gcal.js            Google Calendar (direct from browser) + .ics export
 js/gmail.js           Reads DBS alert emails from Gmail (DBS senders only, DMARC-verified)
 js/expenses.js        Parses DBS alerts, auto-categorises spending
-tests/                node tests/expenses.test.mjs
+tests/                node tests/expenses.test.mjs && node tests/merge.test.mjs
 js/views.js           Screens
 js/app.js             Lock screen, actions, reminders, morning brief, auto-lock
 js/util.js            Date and money helpers

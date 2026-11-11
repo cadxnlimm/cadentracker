@@ -1,66 +1,14 @@
 // Google Calendar, called straight from your browser to Google. No server of ours sits in between.
-// The access token lives in memory only (gone when you lock or close the app).
-// Google's script is loaded only when you press "Connect", so nothing is sent to Google otherwise.
+// Sign-in is shared with the rest of the app (see google.js).
 
-const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+import * as google from './google.js';
+
 const API = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 
-let token = null;
-let tokenExpiry = 0;
-let client = null;
-
-export function loadGis() {
-  if (window.google?.accounts?.oauth2) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.onload = resolve;
-    s.onerror = () => reject(new Error('Could not load Google sign-in (are you offline?)'));
-    document.head.appendChild(s);
-  });
-}
-
-export const isConnected = () => !!token && Date.now() < tokenExpiry;
-
-export async function connect(clientId) {
-  if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
-  await loadGis();
-  return new Promise((resolve, reject) => {
-    client = google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: SCOPE,
-      callback: (resp) => {
-        if (resp.error) return reject(new Error(resp.error_description || resp.error));
-        token = resp.access_token;
-        tokenExpiry = Date.now() + (Number(resp.expires_in) - 60) * 1000;
-        resolve();
-      },
-      error_callback: (e) => reject(new Error(e?.message || 'Google sign-in was cancelled')),
-    });
-    client.requestAccessToken();
-  });
-}
-
-// Signs out at Google too (you'll see the consent screen again next time).
-export function disconnect() {
-  if (token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(token, () => {});
-  forget();
-}
-
-// Drops the token from memory only (used when the app locks). It expires at Google within the hour.
-export function forget() {
-  token = null;
-  tokenExpiry = 0;
-}
+export const isConnected = () => google.has('calendar');
 
 async function call(url, opts = {}) {
-  if (!isConnected()) throw new Error('Google Calendar is not connected');
-  const res = await fetch(url, {
-    ...opts,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
-  });
-  if (res.status === 401) { token = null; throw new Error('Google session expired. Connect again.'); }
-  if (!res.ok) throw new Error(`Google Calendar error ${res.status}`);
+  const res = await google.authFetch(url, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } }, 'Google Calendar');
   return res.json();
 }
 

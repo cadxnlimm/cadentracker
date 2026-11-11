@@ -1,9 +1,9 @@
 // Caches the app's own files so it opens offline. It never caches your data (that lives
 // encrypted in IndexedDB) and never touches requests to Google.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/styles.css',
-  'js/app.js', 'js/store.js', 'js/crypto.js', 'js/gcal.js', 'js/views.js', 'js/util.js', 'js/expenses.js', 'js/gmail.js',
+  'js/app.js', 'js/store.js', 'js/crypto.js', 'js/gcal.js', 'js/views.js', 'js/util.js', 'js/expenses.js', 'js/gmail.js', 'js/google.js', 'js/sync.js', 'js/merge.js', 'js/config.js',
   'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png',
 ];
 

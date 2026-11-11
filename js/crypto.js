@@ -5,7 +5,7 @@ const ITERATIONS = 600_000;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-function b64(buf) {
+export function b64(buf) {
   const bytes = new Uint8Array(buf);
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
