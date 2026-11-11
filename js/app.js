@@ -192,6 +192,18 @@ function safeName(s) {
 }
 
 // ---------------- expenses from DBS alert emails ----------------
+// Money received becomes an income entry; anything else is an expense. Returns 'income' | 'expense' | null.
+function addFromAlert(p, source, msgId = '') {
+  const s = store.state;
+  if (p.incoming) {
+    if (p.currency !== s.settings.currency) return null;
+    s.income.push({ id: store.uid(), source: p.merchant, amount: p.amount, date: isoDay(p.when), recurring: 'none', fromEmail: source === 'email', msgId });
+    return 'income';
+  }
+  addExpense(p, source, msgId);
+  return 'expense';
+}
+
 function addExpense(p, source, msgId = '') {
   const s = store.state;
   s.expenses.push({
@@ -216,7 +228,7 @@ async function syncExpenses(interactive) {
   const now = new Date();
   // first time: from the start of this month; after that, re-check 2 days back so nothing slips through
   const after = sync.lastSync ? sync.lastSync - 2 * 86400 : new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000;
-  let added = 0, skipped = 0, unverified = 0;
+  let added = 0, incomeAdded = 0, skipped = 0, unverified = 0;
   try {
     const ids = (await gmail.listAlertIds(after)).filter((id) => !seen.has(id));
     for (const id of ids) {
@@ -225,8 +237,10 @@ async function syncExpenses(interactive) {
       if (!gmail.isGenuineDbs(d)) { unverified++; continue; }
       const p = parseAlert(d.body, { subject: d.subject, sender: d.sender, sentAt: d.sentAt });
       if (p.skip) { skipped++; continue; }
-      addExpense(p, 'email', id);
-      added++;
+      const kind = addFromAlert(p, 'email', id);
+      if (kind === 'expense') added++;
+      else if (kind === 'income') incomeAdded++;
+      else skipped++;
     }
     sync.seen = sync.seen.slice(-2000);
     sync.lastSync = Math.floor(now.getTime() / 1000);
@@ -236,7 +250,8 @@ async function syncExpenses(interactive) {
       skipped && `${skipped} alert${skipped === 1 ? " wasn't" : "s weren't"} spending (e.g. money in, OTPs, declined)`,
     ].filter(Boolean).join(' · ');
     await store.save();
-    if (interactive || added) toast(added ? `Logged ${added} new expense${added === 1 ? '' : 's'} from DBS` : 'No new DBS spending');
+    const parts = [added && `${added} expense${added === 1 ? '' : 's'}`, incomeAdded && `${incomeAdded} income`].filter(Boolean);
+    if (interactive || parts.length) toast(parts.length ? `Logged ${parts.join(' and ')} from DBS` : 'Nothing new from DBS');
   } catch (err) {
     mail.connected = gmail.isConnected();
     throw err;
@@ -354,18 +369,23 @@ viewEl.addEventListener('submit', async (e) => {
       case 'paste-alert': {
         const p = parseAlert(f.alert, { sentAt: new Date() });
         if (p.skip) throw new Error(p.skip === 'no amount' || p.skip === 'no payee' ? "Couldn't find an amount and payee in that text" : `That alert isn't spending (${p.skip})`);
-        addExpense(p, 'pasted');
+        if (p.incoming && p.currency !== s.settings.currency) throw new Error(`That's money received in ${p.currency}; add it under Income in ${s.settings.currency}`);
+        addFromAlert(p, 'pasted');
         form.reset();
-        return commit(`Logged ${p.currency} ${p.amount.toFixed(2)} at ${p.merchant}`);
+        return commit(p.incoming ? `Logged ${p.currency} ${p.amount.toFixed(2)} received as income` : `Logged ${p.currency} ${p.amount.toFixed(2)} at ${p.merchant}`);
       }
 
-      case 'saving':
-        s.savings.push({ id: store.uid(), name: f.name.trim(), monthly: num(f.monthly), target: num(f.target), saved: num(f.saved) });
-        return commit('Savings budget added');
+      case 'saving': {
+        const pct = Math.min(100, num(f.pct));
+        if (!pct && !num(f.monthly)) throw new Error('Enter an amount per month or a % of income');
+        s.savings.push({ id: store.uid(), name: f.name.trim(), monthly: pct ? 0 : num(f.monthly), pct, target: num(f.target), saved: num(f.saved), log: [] });
+        return commit('Budget added');
+      }
 
       case 'deposit': {
         const g = s.savings.find((x) => x.id === id);
         g.saved = Math.round((num(g.saved) + num(f.amount)) * 100) / 100;
+        (g.log ||= []).push({ date: isoDay(), amount: num(f.amount) });
         return commit('Logged');
       }
 

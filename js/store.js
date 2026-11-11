@@ -12,8 +12,8 @@ export let state = null;
 
 export function emptyState() {
   return {
-    income: [],         // {id, source, amount, date, recurring: 'none'|'monthly'}
-    savings: [],        // {id, name, monthly, target, saved}
+    income: [],         // {id, source, amount, date, recurring: 'none'|'monthly', fromEmail, msgId}
+    savings: [],        // {id, name, monthly, pct (% of the month's income, overrides monthly), target, saved, log: [{date, amount}]}
     bills: [],          // {id, name, amount, cycle: 'weekly'|'monthly'|'yearly', nextDue, kind: 'subscription'|'bill'}
     tasks: [],          // {id, title, due, notes, done, remind, notified}
     trainings: [],      // {id, name, trainees, totalLessons, currentLesson, nextSession, notes, log: [{date, lesson, note}]}
@@ -55,7 +55,21 @@ export async function createVault(passphrase) {
   iterations = ITERATIONS;
   key = await deriveKey(passphrase, salt, iterations);
   state = emptyState();
+  migrate();
   await save();
+}
+
+// One-off additions to existing data. Each runs once per vault.
+function migrate() {
+  const st = state.settings;
+  if (!st.titheAdded) {
+    if (!state.savings.some((g) => /^tithe$/i.test(g.name))) {
+      state.savings.unshift({ id: uid(), name: 'Tithe', monthly: 0, pct: 10, target: 0, saved: 0, log: [] });
+    }
+    st.titheAdded = true;
+    return true;
+  }
+  return false;
 }
 
 export async function unlock(passphrase) {
@@ -73,6 +87,7 @@ async function openBlob(blob, passphrase) {
   key = k;
   const base = emptyState();
   state = { ...base, ...data, settings: { ...base.settings, ...(data.settings || {}) } };
+  if (migrate()) await save();
 }
 
 export async function save() {

@@ -1,29 +1,42 @@
 // Each view returns an HTML string. Every piece of user data passes through esc().
-import { CATEGORIES, NOT_SPENDING } from './expenses.js';
+import { CATEGORIES, NOT_SPENDING, GIVING } from './expenses.js';
 import { esc, money, fmtDay, fmtDT, fmtTime, parseDay, parseDT, startOfDay, sameDay, isoDay, DAY, monthlyCost } from './util.js';
 
 const hasTime = (s) => !!s && s.length > 10;
 
 // ---------- shared calculations ----------
-export function monthSummary(s) {
-  const now = new Date();
-  const m0 = new Date(now.getFullYear(), now.getMonth(), 1);
-  const m1 = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const income = s.income.reduce((sum, i) => {
+// Income received in the month starting at m0. A monthly income counts in every month from its start date.
+function incomeIn(s, m0) {
+  const m1 = new Date(m0.getFullYear(), m0.getMonth() + 1, 1);
+  return s.income.reduce((sum, i) => {
     const d = parseDay(i.date);
     if (!d) return sum;
     if (i.recurring === 'monthly') return d < m1 ? sum + Number(i.amount) : sum;
     return d >= m0 && d < m1 ? sum + Number(i.amount) : sum;
   }, 0);
+}
+
+// A budget is either a fixed amount a month or a % of the month's income (e.g. Tithe = 10%).
+export const budgetFor = (g, income) => (Number(g.pct) > 0 ? Math.round(income * Number(g.pct)) / 100 : Number(g.monthly) || 0);
+
+export function monthSummary(s) {
+  const now = new Date();
+  const m0 = new Date(now.getFullYear(), now.getMonth(), 1);
+  const m1 = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const income = incomeIn(s, m0);
+  let yearIncome = 0;
+  for (let m = 0; m <= now.getMonth(); m++) yearIncome += incomeIn(s, new Date(now.getFullYear(), m, 1));
   const committed = s.bills.reduce((sum, b) => sum + monthlyCost(b), 0);
-  const saving = s.savings.reduce((sum, g) => sum + (Number(g.monthly) || 0), 0);
+  const saving = s.savings.reduce((sum, g) => sum + budgetFor(g, income), 0);
   const cur = s.settings.currency;
   const monthExp = (s.expenses || []).filter((x) => { const d = new Date(x.when); return d >= m0 && d < m1; });
   const counted = monthExp.filter((x) => x.currency === cur && !NOT_SPENDING.has(x.category));
   const spent = counted.reduce((sum, x) => sum + Number(x.amount), 0);
   const byCat = {};
   for (const x of counted) byCat[x.category] = (byCat[x.category] || 0) + Number(x.amount);
-  return { income, committed, saving, spent, byCat, monthExp, left: income - committed - saving - spent };
+  // giving paid from your account this month (imported or added) counts towards the Tithe budget
+  const givenThisMonth = monthExp.filter((x) => x.currency === cur && x.category === GIVING).reduce((sum, x) => sum + Number(x.amount), 0);
+  return { income, yearIncome, committed, saving, spent, byCat, monthExp, givenThisMonth, left: income - committed - saving - spent };
 }
 
 export function upcoming(s, days = 7) {
@@ -249,7 +262,11 @@ export function moneyView(s, mail = {}) {
   <div class="grid-2">
     <section class="card">
       <h2>Income</h2>
-      <form class="stack-form" data-form="income">
+      <div class="stats two">
+        ${stat('This month', money(m.income, cur))}
+        ${stat(`Total ${new Date().getFullYear()}`, money(m.yearIncome, cur))}
+      </div>
+      <form class="stack-form spaced" data-form="income">
         <div class="field-row">
           <label>Source<input name="source" required placeholder="e.g. Salary"></label>
           <label>Amount<input name="amount" type="number" step="0.01" min="0" required inputmode="decimal"></label>
@@ -262,16 +279,17 @@ export function moneyView(s, mail = {}) {
       </form>
       ${incomes.length ? `<ul class="list">${incomes.map((i) => `<li class="row"><div class="row-main">
         <div class="row-title">${esc(i.source)} <span class="muted">${esc(money(i.amount, cur))}</span></div>
-        <div class="row-sub">${i.recurring === 'monthly' ? `Monthly since ${esc(fmtDay(parseDay(i.date)))}` : esc(fmtDay(parseDay(i.date)))}</div></div>
+        <div class="row-sub">${i.recurring === 'monthly' ? `Monthly since ${esc(fmtDay(parseDay(i.date)))}` : esc(fmtDay(parseDay(i.date)))}${i.fromEmail ? ' · from DBS alert' : ''}</div></div>
         <button class="btn-ghost sm danger" data-act="income-del" data-id="${esc(i.id)}" aria-label="Delete">✕</button></li>`).join('')}</ul>` : empty('No income logged yet.')}
     </section>
 
     <section class="card">
-      <h2>Savings budgets</h2>
+      <h2>Budgets &amp; savings</h2>
       <form class="stack-form" data-form="saving">
+        <label>Name<input name="name" required placeholder="e.g. Emergency fund"></label>
         <div class="field-row">
-          <label>Name<input name="name" required placeholder="e.g. Emergency fund"></label>
-          <label>Set aside / month<input name="monthly" type="number" step="0.01" min="0" required inputmode="decimal"></label>
+          <label>Set aside / month<input name="monthly" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Amount"></label>
+          <label>or % of income<input name="pct" type="number" step="0.5" min="0" max="100" inputmode="decimal" placeholder="e.g. 10"></label>
         </div>
         <div class="field-row">
           <label>Goal (optional)<input name="target" type="number" step="0.01" min="0" inputmode="decimal"></label>
@@ -281,16 +299,27 @@ export function moneyView(s, mail = {}) {
       </form>
       ${s.savings.length ? `<ul class="list">${s.savings.map((g) => {
         const pct = g.target ? Math.min(100, (Number(g.saved) / Number(g.target)) * 100) : 0;
-        return `<li class="row col"><div class="row-head"><div class="row-main">
-          <div class="row-title">${esc(g.name)}</div>
-          <div class="row-sub">${esc(money(g.monthly, cur))}/month · saved ${esc(money(g.saved, cur))}${g.target ? ` of ${esc(money(g.target, cur))}` : ''}</div></div>
+        const amt = budgetFor(g, m.income);
+        const isPct = Number(g.pct) > 0;
+        const isTithe = /^tithe$/i.test(g.name);
+        // this month: amounts you logged here, plus (for Tithe) giving paid from your account
+        const m0 = isoDay(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+        const logged = (g.log || []).filter((l) => l.date >= m0).reduce((sum, l) => sum + Number(l.amount), 0);
+        const done = logged + (isTithe ? m.givenThisMonth : 0);
+        const monthPct = amt > 0 ? Math.min(100, (done / amt) * 100) : 0;
+        return `<li class="row col ${isTithe ? 'tithe' : ''}"><div class="row-head"><div class="row-main">
+          <div class="row-title">${esc(g.name)}${isPct ? ` <span class="tag">${esc(g.pct)}% of income</span>` : ''}</div>
+          <div class="row-sub">${esc(money(amt, cur))} this month${isPct && !m.income ? ' (add your income to work this out)' : ''} · ${isTithe ? 'given' : 'set aside'} ${esc(money(done, cur))}${done >= amt && amt > 0 ? ' ✓' : ''}</div>
+          ${g.target ? `<div class="row-sub">Saved ${esc(money(g.saved, cur))} of ${esc(money(g.target, cur))}</div>` : !isTithe && Number(g.saved) ? `<div class="row-sub">Saved in total ${esc(money(g.saved, cur))}</div>` : ''}</div>
           <button class="btn-ghost sm danger" data-act="saving-del" data-id="${esc(g.id)}" aria-label="Delete">✕</button></div>
-          ${g.target ? `<div class="progress"><span data-w="${pct}"></span></div>` : ''}
+          ${amt > 0 ? `<div class="progress" title="This month"><span data-w="${monthPct}"></span></div>` : ''}
+          ${g.target ? `<div class="progress thin"><span class="alt" data-w="${pct}"></span></div>` : ''}
+          ${isTithe ? `<p class="muted small">Paid by PayNow or card? Set that payment's category to "Tithe &amp; giving" and it counts here automatically (and isn't counted as spending).</p>` : ''}
           <form class="inline-form" data-form="deposit" data-id="${esc(g.id)}">
-            <input name="amount" type="number" step="0.01" placeholder="Amount (negative to withdraw)" required inputmode="decimal">
+            <input name="amount" type="number" step="0.01" placeholder="${/^tithe$/i.test(g.name) ? 'Log an amount given' : 'Amount (minus to withdraw)'}" required inputmode="decimal">
             <button class="btn-ghost">Log</button>
           </form></li>`;
-      }).join('')}</ul>` : empty('No savings budgets yet.')}
+      }).join('')}</ul>` : empty('No budgets yet.')}
     </section>
   </div>
 

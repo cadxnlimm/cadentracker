@@ -20,7 +20,13 @@ r = parseAlert('Amount: SGD 4.50\nFrom: PayLah! Wallet (Mobile ending 1234)\nTo:
 assert.equal(r.via, 'paylah');
 // 6. skips
 assert.equal(parseAlert('Your OTP is 123456', {}).skip, 'no amount');
-assert.equal(parseAlert('You have received SGD 50.00 via PayNow\nAmount: SGD50.00\nTo: My account', {}).skip, 'incoming');
+r = parseAlert('You have received SGD 50.00 via PayNow\nAmount: SGD50.00\nTo: My account', {});
+assert.equal(r.incoming, true); assert.equal(r.amount, 50);
+r = parseAlert('Incoming PayNow\nAmount: SGD2,400.00\nFrom: ACME PTE LTD\nTo: My Account A/C ending 1234', { subject: 'Incoming PayNow Transfer' });
+assert.equal(r.incoming, true); assert.equal(r.merchant, 'ACME PTE LTD'); assert.equal(r.amount, 2400);
+assert.equal(parseAlert('Refund\nAmount: SGD5.00\nTo: X', {}).skip, 'refund');
+assert.equal(parseAlert('Amount: SGD5.00\nFrom: DBS/POSB card ending 1\nTo: X', {}).incoming, false);
+assert.equal(categorize('GRACE CHURCH SINGAPORE', 'paynow'), 'Tithe & giving');
 assert.equal(parseAlert('Your transaction was declined\nAmount: SGD50.00\nTo: X', {}).skip, 'declined');
 // 7. foreign currency
 r = parseAlert('Amount: USD15.99\nFrom: DBS/POSB card ending 1\nTo: NETFLIX.COM LOS GATOS USA', { sentAt: sent });
