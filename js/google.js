@@ -5,6 +5,8 @@
 
 export const SCOPES = {
   calendar: 'https://www.googleapis.com/auth/calendar.events',
+  // names and colours of the calendars under "My calendars" (read-only), for choosing where events go
+  calendarList: 'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
   gmail: 'https://www.googleapis.com/auth/gmail.readonly',
   // drive.appdata = only a hidden folder this app creates in your Drive. It can't see any of your files.
   drive: 'https://www.googleapis.com/auth/drive.appdata',

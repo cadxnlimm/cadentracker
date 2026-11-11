@@ -156,7 +156,7 @@ export function today(s, cal, mail = {}, sync = null) {
       <h2>On your calendar today</h2>
       ${cal.connected
         ? (todayEvents.length
-          ? `<ul class="list">${todayEvents.map((e) => `<li class="row"><div class="dot dot-cal"></div><div class="row-main"><div class="row-title">${esc(e.title)}</div><div class="row-sub">${e.allDay ? 'All day' : `${esc(fmtTime(new Date(e.start)))} – ${esc(fmtTime(new Date(e.end)))}`}</div></div></li>`).join('')}</ul>`
+          ? `<ul class="list">${todayEvents.map((e) => eventRow(e, cal)).join('')}</ul>`
           : empty('No events today.'))
         : `<p class="muted">Connect Google Calendar to see today's events here.</p><button class="btn-ghost" data-act="gcal-connect">Connect Google Calendar</button>`}
     </section>
@@ -460,6 +460,21 @@ export function trainingView(s) {
 }
 
 // ---------- CALENDAR ----------
+function eventRow(e, cal) {
+  const many = (cal.calendars || []).filter((c) => c.shown).length > 1;
+  const when = e.allDay ? 'All day' : `${fmtTime(new Date(e.start))} – ${fmtTime(new Date(e.end))}`;
+  return `<li class="row"><div class="dot dot-cal" ${e.color ? `data-color="${esc(e.color)}"` : ''}></div><div class="row-main">
+    <div class="row-title">${esc(e.title)}</div><div class="row-sub">${esc(when)}${many && e.calendar ? ` · ${esc(e.calendar)}` : ''}</div></div></li>`;
+}
+
+function calendarPicker(s, cal) {
+  const list = cal.calendars || [];
+  if (!cal.connected || !list.length) return '';
+  const chosen = list.some((c) => c.id === s.settings.calendarId) ? s.settings.calendarId : (list.find((c) => c.primary) || list[0]).id;
+  return `<label>Calendar<select name="calendarId">${list.map((c) => `<option value="${esc(c.id)}" ${c.id === chosen ? 'selected' : ''}>${esc(c.primary ? `${c.name} (main)` : c.name)}</option>`).join('')}</select>
+    <span class="hint">Remembered, and also used when you send to-dos and trainings to Google Calendar.</span></label>`;
+}
+
 export function calendarView(s, cal) {
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
@@ -481,10 +496,9 @@ export function calendarView(s, cal) {
       const k = isoDay(new Date(e.start));
       (days[k] ||= []).push(e);
     }
-    body = `<section class="card"><div class="row-head"><h2>Next 7 days</h2>
-        <div><button class="btn-ghost sm" data-act="gcal-refresh">Refresh</button> <button class="btn-ghost sm" data-act="google-disconnect">Disconnect Google</button></div></div>
-      ${Object.keys(days).length ? Object.entries(days).map(([k, evs]) => `<h3>${esc(fmtDay(parseDay(k)))}</h3><ul class="list">${evs.map((e) => `<li class="row"><div class="dot dot-cal"></div><div class="row-main">
-        <div class="row-title">${esc(e.title)}</div><div class="row-sub">${e.allDay ? 'All day' : `${esc(fmtTime(new Date(e.start)))} – ${esc(fmtTime(new Date(e.end)))}`}</div></div></li>`).join('')}</ul>`).join('') : empty('Nothing on your calendar this week.')}
+    body = `<section class="card"><h2>Next 7 days</h2>
+        <div class="btn-row">${'<button class="btn-ghost sm" data-act="gcal-refresh">Refresh</button>'} <button class="btn-ghost sm" data-act="google-disconnect">Disconnect Google</button></div>
+      ${Object.keys(days).length ? Object.entries(days).map(([k, evs]) => `<h3>${esc(fmtDay(parseDay(k)))}</h3><ul class="list">${evs.map((e) => eventRow(e, cal)).join('')}</ul>`).join('') : empty('Nothing on your calendar this week.')}
     </section>`;
   }
 
@@ -493,6 +507,7 @@ export function calendarView(s, cal) {
   <section class="card"><h2>Add an event</h2>
     <form class="stack-form" data-form="event">
       <label>Title<input name="title" required autocomplete="off"></label>
+      ${calendarPicker(s, cal)}
       <div class="field-row three">
         <label>Starts<input name="start" type="datetime-local" value="${startVal}" required></label>
         <label>Length<select name="duration"><option value="30">30 min</option><option value="60" selected>1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option><option value="480">All day-ish (8h)</option></select></label>

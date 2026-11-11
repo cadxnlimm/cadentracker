@@ -12,7 +12,7 @@ It's a web app you can install on your phone's home screen and also open on your
 | **Money** | Log income (one-off or monthly); money received that DBS emails you about is added automatically. Shows income this month and the total for the year. Budgets & savings as a fixed amount or a % of income, with this month's progress. A **Tithe** budget (10% of income) is set up for you, and any payment categorised "Tithe & giving" counts towards it instead of as spending. Bills & subscriptions with weekly/monthly/yearly cycles, a "Paid" button that rolls the due date forward, and monthly/yearly totals. **Spending is logged automatically from your DBS/POSB alert emails** (card, PayNow, PayLah!), sorted into categories you can correct (the app remembers your corrections). Cash can be added by hand, or paste any DBS alert text. "Left to spend" = income − bills − savings − spending. |
 | **To-dos** | To-dos with due date/time, notes and reminders. You can push any to-do to Google Calendar or download it as an `.ics` file. |
 | **Training** | Each programme tracks group/trainees, current lesson out of total, next session, notes and a lesson history. "Lesson done" logs it, moves to the next lesson and asks for the next date. |
-| **Calendar** | Connect Google Calendar to see the next 7 days and add events (with a reminder) when you want to. |
+| **Calendar** | See the next 7 days from every calendar you have ticked in Google Calendar (each in its own colour), and add events with a reminder to whichever of your calendars you pick. The choice is remembered and also used for to-dos and trainings you send to Google Calendar. |
 | **Settings** | Currency, morning brief time, auto-lock, notifications, encrypted backup export/import, change passphrase, erase device. |
 
 ## Privacy model
@@ -78,7 +78,7 @@ The app uses your **own** Google Cloud OAuth client, so no third-party app ever 
    - `http://localhost:8000` (only if you'll run it locally)
 5. Copy the **Client ID** (`…apps.googleusercontent.com`) into the app's **Settings → Google OAuth Client ID**, save, then press **Settings → Sync between devices → Turn on sync**. (Optional: put the Client ID in `js/config.js` so a new device doesn't need it typed in. It isn't secret.)
 
-Google will warn that the app is unverified. That's expected because it's your own unpublished app; click **Continue** and allow all three: `calendar.events` (read and add events), `gmail.readonly` (used only to find DBS alert emails) and `drive.appdata` (the hidden sync folder only).
+Google will warn that the app is unverified. That's expected because it's your own unpublished app; click **Continue** and allow everything listed: `calendar.events` (read and add events), `calendar.calendarlist.readonly` (the names of your calendars, so you can choose which one an event goes to), `gmail.readonly` (used only to find DBS alert emails) and `drive.appdata` (the hidden sync folder only).
 
 ### 4. Log DBS spending automatically (optional, ~5 minutes)
 

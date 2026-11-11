@@ -94,7 +94,7 @@ main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1100px; width: 100%
 .row.done .row-title { text-decoration: line-through; color: var(--muted); }
 .empty { color: var(--muted); font-size: .92rem; margin: .4em 0; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.dot-cal { background: var(--cal); }
+.dot-cal { background: var(--c, var(--cal)); }
 .dot-train { background: var(--train); }
 .dot-bill { background: var(--bills); }
 
@@ -148,6 +148,7 @@ main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1100px; width: 100%
 .setup { margin-top: 14px; }
 .steps { padding-left: 20px; margin: 0 0 10px; display: grid; gap: 10px; font-size: .9rem; }
 .spaced { margin-top: 16px; }
+.hint { font-weight: 400; font-size: .78rem; color: var(--muted); }
 .head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 8px; font-size: .8rem; font-weight: 600; color: var(--muted); padding: 7px 12px; border-radius: 99px; box-shadow: var(--inset-sm); white-space: nowrap; }
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }

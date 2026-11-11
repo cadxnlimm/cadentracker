@@ -16,7 +16,7 @@ const appEl = $('#app');
 const viewEl = $('#view');
 
 let current = 'today';
-let cal = { connected: false, events: [] };
+let cal = { connected: false, events: [], calendars: [] };
 let mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
 let sy = { status: 'off', lastSynced: 0, msg: '', again: false }; // sync between devices
 let syncTimer = null;
@@ -181,7 +181,7 @@ async function doLock() {
   store.lock();
   google.forget();
   sync.reset();
-  cal = { connected: false, events: [] };
+  cal = { connected: false, events: [], calendars: [] };
   mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
   sy = { status: 'off', lastSynced: 0, msg: '', again: false };
   viewEl.innerHTML = '';
@@ -208,6 +208,7 @@ function render() {
   viewEl.innerHTML = html;
   // widths are applied via CSSOM so the strict CSP can forbid inline styles
   viewEl.querySelectorAll('[data-w]').forEach((el) => el.style.setProperty('--w', `${Math.max(0, Number(el.dataset.w) || 0)}%`));
+  viewEl.querySelectorAll('[data-color]').forEach((el) => { if (/^#[0-9a-f]{3,8}$/i.test(el.dataset.color)) el.style.setProperty('--c', el.dataset.color); });
   document.querySelectorAll('.nav [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === current));
 }
 
@@ -321,7 +322,8 @@ document.querySelector('.nav').addEventListener('click', (e) => {
 async function refreshCalendar() {
   try {
     const from = startOfDay();
-    cal.events = await gcal.listEvents(from, new Date(from.getTime() + 7 * DAY));
+    cal.calendars = await gcal.listCalendars().catch(() => cal.calendars);
+    cal.events = await gcal.listEvents(from, new Date(from.getTime() + 7 * DAY), cal.calendars);
     cal.connected = true;
   } catch (err) {
     cal.connected = gcal.isConnected();
@@ -352,10 +354,21 @@ function eventFromTraining(t) {
   };
 }
 
+// Which calendar events go to: the one you picked last on the Calendar tab (remembered and synced),
+// falling back to your main calendar if that one no longer exists.
+function targetCalendar(id) {
+  const want = id || store.state.settings.calendarId || 'primary';
+  const found = cal.calendars.find((c) => c.id === want);
+  if (found) return found;
+  return cal.calendars.find((c) => c.primary) || { id: 'primary', name: 'your main calendar' };
+}
+
 async function pushToCalendar(ev) {
   await ensureCalendar();
-  await gcal.createEvent(ev);
-  toast('Added to Google Calendar');
+  if (!cal.calendars.length) cal.calendars = await gcal.listCalendars().catch(() => []);
+  const target = targetCalendar(ev.calendarId);
+  await gcal.createEvent({ ...ev, calendarId: target.id });
+  toast(`Added to ${target.primary || target.id === 'primary' ? 'your main calendar' : target.name}`);
   refreshCalendar();
 }
 
@@ -466,7 +479,7 @@ viewEl.addEventListener('click', async (e) => {
       case 'gcal-disconnect':
       case 'google-disconnect':
         google.disconnect(); sync.reset();
-        cal = { connected: false, events: [] }; mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
+        cal = { connected: false, events: [], calendars: [] }; mail = { connected: false, syncing: false, lastChecked: 0, note: '' };
         sy = { ...sy, status: 'off' };
         toast('Disconnected from Google on this device'); return render();
       case 'google-connect': await connectGoogle(); toast('Connected to Google'); return afterConnect();
@@ -610,7 +623,8 @@ viewEl.addEventListener('submit', async (e) => {
 
       case 'event': {
         const start = parseDT(f.start);
-        const ev = { title: f.title.trim(), description: f.description.trim(), start, end: new Date(start.getTime() + num(f.duration) * 60000), reminderMin: num(f.reminder) };
+        const ev = { title: f.title.trim(), description: f.description.trim(), start, end: new Date(start.getTime() + num(f.duration) * 60000), reminderMin: num(f.reminder), calendarId: f.calendarId || '' };
+        if (f.calendarId && f.calendarId !== s.settings.calendarId) { s.settings.calendarId = f.calendarId; await store.save(); scheduleSync(); }
         const target = e.submitter?.value || 'ics';
         if (target === 'gcal') { await pushToCalendar(ev); form.reset(); }
         else download(`${safeName(ev.title)}.ics`, gcal.icsFor(ev), 'text/calendar');
