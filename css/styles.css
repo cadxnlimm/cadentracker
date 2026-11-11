@@ -144,7 +144,17 @@ main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1100px; width: 100%
   .exp-row .row-head { flex: 1; align-items: center; }
 }
 .sm-select { font-size: .8rem !important; padding: 6px 10px !important; border-radius: 10px !important; width: auto !important; max-width: 100%; }
-.add-exp { margin-top: 14px; }
+.add-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; margin-top: 14px; }
+.add-row .add-exp[open] { flex-basis: 100%; order: 2; }
+.fold { margin-top: 16px; }
+.fold > summary { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border-radius: 14px; background: var(--bg); box-shadow: var(--raised-sm); font-weight: 600; font-size: .9rem; }
+.fold > summary:hover .fold-label { color: var(--accent); }
+.fold[open] > summary { box-shadow: var(--inset-sm); margin-bottom: 6px; }
+.fold > summary .muted { margin-left: auto; font-weight: 500; }
+.chev { width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg) translateY(-2px); transition: transform .15s; flex: none; }
+.fold[open] > summary .chev { transform: rotate(-135deg) translateX(-2px); }
+.fold.inner { margin-top: 10px; }
+.fold.inner > summary { font-size: .85rem; padding: 8px 12px; }
 .setup { margin-top: 14px; }
 .steps { padding-left: 20px; margin: 0 0 10px; display: grid; gap: 10px; font-size: .9rem; }
 .spaced { margin-top: 16px; }

@@ -143,6 +143,7 @@ function enterApp(autoGoogle = null) {
   autoErr = '';
   // keep a readable copy of the (non-secret) Client ID, so the next unlock can reconnect Google by itself
   if (store.state.settings.googleClientId) rememberClientId(store.state.settings.googleClientId);
+  recategorizeOnce();
   lastFailedTry = 0;
   render();
   startTicker();
@@ -157,6 +158,21 @@ function enterApp(autoGoogle = null) {
       })
       .catch((err) => { autoErr = err.message; if (sy.status === 'connecting') sy.status = 'off'; safeRender(); });
   } else if (google.isConnected()) afterConnect().catch((err) => toast(err.message, true));
+}
+
+// Categories got smarter (e.g. church payments → "Tithe & giving"). Re-sort expenses imported earlier, once.
+// Payees you've categorised yourself have a rule, and categorize() keeps those.
+function recategorizeOnce() {
+  const s = store.state;
+  if ((s.settings.catVersion || 0) >= 2) return;
+  let changed = 0;
+  for (const x of s.expenses) {
+    if (x.source === 'manual') continue;
+    const cat = categorize(x.merchant, x.via, { rules: s.categoryRules, bills: s.bills });
+    if (cat !== x.category && (x.category === 'Transfers to others' || x.category === 'Other')) { x.category = cat; changed++; }
+  }
+  s.settings.catVersion = 2;
+  store.save().then(() => { if (changed) { render(); toast(`Re-sorted ${changed} earlier expense${changed === 1 ? '' : 's'} into better categories`); } scheduleSync(); });
 }
 
 // ---------------- keeping Google connected ----------------
@@ -545,6 +561,15 @@ viewEl.addEventListener('click', async (e) => {
     toast(err.message, true);
   }
 });
+
+// Remember which fold-away sections you opened, so re-drawing the screen doesn't close them.
+viewEl.addEventListener('toggle', (e) => {
+  const key = e.target.dataset?.fold;
+  if (!key) return;
+  V.ui.open[key] = e.target.open;
+  const label = e.target.querySelector(':scope > summary .fold-label');
+  if (label && key === 'tx') label.textContent = `${e.target.open ? 'Hide' : 'Show'} transactions`;
+}, true);
 
 viewEl.addEventListener('change', async (e) => {
   if (e.target.dataset.act === 'task-mins') {

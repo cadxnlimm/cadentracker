@@ -225,6 +225,9 @@ export function today(s, cal, mail = {}, sync = null) {
 }
 
 // ---------- MONEY ----------
+// Which fold-away sections are open (kept while the app is open; the app updates it).
+export const ui = { open: {} };
+
 const VIA = { card: 'Card', paynow: 'PayNow', paylah: 'PayLah!', transfer: 'Transfer', cash: 'Added by you' };
 
 function expenseRow(x, cur) {
@@ -281,8 +284,12 @@ function spendingCard(s, m, mail) {
     <div class="row-head"><h2>Spending this month</h2><span class="big-num">${esc(money(m.spent, cur))}</span></div>
     ${sync}
     ${cats.length ? `<ul class="cat-bars">${cats.map(([c, v]) => `<li><span class="cat-name">${esc(c)}</span><span class="progress"><span data-w="${(v / max) * 100}"></span></span><span class="cat-amt">${esc(money(v, cur))}</span></li>`).join('')}</ul>` : ''}
-    ${list.length ? `<ul class="list">${list.map((x) => expenseRow(x, cur)).join('')}</ul>` : empty('No spending logged this month yet.')}
-    ${earlier.length ? `<details><summary class="muted">Earlier (${earlier.length})</summary><ul class="list">${earlier.map((x) => expenseRow(x, cur)).join('')}</ul></details>` : ''}
+    ${list.length || earlier.length ? `<details class="fold" data-fold="tx" ${ui.open.tx ? 'open' : ''}>
+      <summary><span class="fold-label">${ui.open.tx ? 'Hide' : 'Show'} transactions</span><span class="muted small">${list.length} this month${earlier.length ? ` · ${earlier.length} earlier` : ''}</span><span class="chev" aria-hidden="true"></span></summary>
+      ${list.length ? `<ul class="list">${list.map((x) => expenseRow(x, cur)).join('')}</ul>` : empty('No spending logged this month yet.')}
+      ${earlier.length ? `<details class="fold inner" data-fold="txEarlier" ${ui.open.txEarlier ? 'open' : ''}><summary><span class="fold-label">Earlier</span><span class="muted small">${earlier.length}</span><span class="chev" aria-hidden="true"></span></summary><ul class="list">${earlier.map((x) => expenseRow(x, cur)).join('')}</ul></details>` : ''}
+    </details>` : empty('No spending logged this month yet.')}
+    <div class="add-row">
     <details class="add-exp"><summary class="btn-ghost sm">+ Cash or other spending</summary>
       <form class="stack-form" data-form="expense">
         <div class="field-row">
@@ -302,6 +309,7 @@ function spendingCard(s, m, mail) {
         <button class="btn-ghost">Log it</button>
       </form>
     </details>
+    </div>
   </section>`;
 }
 
