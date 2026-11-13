@@ -191,6 +191,7 @@ main { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1100px; width: 100%
 .attend legend { font-size: .82rem; font-weight: 600; color: var(--muted); padding: 0; margin-bottom: 4px; }
 .session .row-actions details.inline[open] { flex-basis: 100%; order: 5; }
 .count { color: var(--accent); }
+.sub-label { font-size: .75rem; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 12px 0 0; }
 .log-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; }
 .log-list li { display: grid; grid-template-columns: 9.5em 1fr auto; gap: 12px; align-items: baseline; padding: 9px 4px; border-bottom: 1px solid var(--line); font-size: .9rem; }
 .log-list li:last-child { border-bottom: 0; }

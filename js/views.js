@@ -52,11 +52,16 @@ export function upcoming(s, days = 7) {
   const trainings = (s.sessions || [])
     .filter((x) => x.status === 'planned' && sessionStart(x) && (needsLogging(x) || (sessionStart(x) >= today && sessionStart(x) < until)))
     .sort((a, b) => sessionStart(a) - sessionStart(b));
+  // the next few after this week, so Today never looks empty when trainings are planned further out
+  const trainingsLater = (s.sessions || [])
+    .filter((x) => x.status === 'planned' && sessionStart(x) && sessionStart(x) >= until)
+    .sort((a, b) => sessionStart(a) - sessionStart(b))
+    .slice(0, 3);
   const bills = s.bills
     .filter((b) => b.nextDue && parseDay(b.nextDue) < until)
     .sort((a, b) => parseDay(a.nextDue) - parseDay(b.nextDue));
   const byDue = (a, b) => parseDT(a.due) - parseDT(b.due);
-  return { overdue: overdue.sort(byDue), todayTasks: todayTasks.sort(byDue), week: week.sort(byDue), trainings, bills };
+  return { overdue: overdue.sort(byDue), todayTasks: todayTasks.sort(byDue), week: week.sort(byDue), trainings, trainingsLater, bills };
 }
 
 // ---------- pieces ----------
@@ -125,6 +130,15 @@ function trainingMini(x, names = {}) {
   return `<li class="row"><div class="dot dot-train"></div><div class="row-main">
     <div class="row-title">${esc(x.title)}</div>
     <div class="row-sub ${late ? 'late' : ''}">${esc(fmtDT(sessionStart(x), hasTime(x.date)))}${who ? ` · ${esc(who)}` : ''}${late ? ' · needs logging' : ''}</div></div></li>`;
+}
+
+function trainingsBox(s, u) {
+  const names = Object.fromEntries((s.trainees || []).map((t) => [t.id, t.name]));
+  if (!u.trainings.length && !u.trainingsLater.length) {
+    return `${empty('No trainings planned.')}<button class="btn-ghost sm" data-act="goto" data-view="training">+ Add a training</button>`;
+  }
+  return `${u.trainings.length ? `<ul class="list">${u.trainings.map((x) => trainingMini(x, names)).join('')}</ul>` : empty('None this week.')}
+    ${u.trainingsLater.length ? `<p class="sub-label">Later</p><ul class="list">${u.trainingsLater.map((x) => trainingMini(x, names)).join('')}</ul>` : ''}`;
 }
 
 function billMini(b, cur) {
@@ -209,7 +223,7 @@ export function today(s, cal, mail = {}, sync = null) {
     <h2>This week</h2>
     <div class="grid-3">
       <div><h3>To-dos</h3>${u.week.length ? `<ul class="list">${u.week.map((t) => taskRow(t, { compact: true })).join('')}</ul>` : empty('Clear week.')}</div>
-      <div><h3>Trainings</h3>${u.trainings.length ? `<ul class="list">${u.trainings.map((x) => trainingMini(x, Object.fromEntries((s.trainees || []).map((t) => [t.id, t.name])))).join('')}</ul>` : empty('No sessions scheduled.')}</div>
+      <div><h3>Trainings</h3>${trainingsBox(s, u)}</div>
       <div><h3>Bills due</h3>${u.bills.length ? `<ul class="list">${u.bills.map((b) => billMini(b, cur)).join('')}</ul>` : empty('Nothing due.')}</div>
     </div>
   </section>
