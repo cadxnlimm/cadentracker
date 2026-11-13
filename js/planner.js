@@ -1,12 +1,13 @@
+import { sessionStart, sessionEnd, hasTime } from './training.js';
 // Finds free time in your calendar for your to-dos. Pure functions: no network, no storage.
 
 const MIN = 60_000;
 const DAY = 86_400_000;
 const roundUp = (t, step) => Math.ceil(t / (step * MIN)) * step * MIN;
 
-// Busy periods from calendar events, trainings and to-dos you've already booked.
+// Busy periods from calendar events, planned training sessions and to-dos you've already booked.
 // All-day events and events marked "free" in Google Calendar don't block time.
-export function busyTimes({ events = [], trainings = [], tasks = [] }) {
+export function busyTimes({ events = [], sessions = [], tasks = [] }) {
   const busy = [];
   for (const e of events) {
     if (e.allDay || e.free) continue;
@@ -14,10 +15,9 @@ export function busyTimes({ events = [], trainings = [], tasks = [] }) {
     const en = new Date(e.end).getTime();
     if (en > s) busy.push([s, en]);
   }
-  for (const t of trainings) {
-    if (!t.nextSession || t.nextSession.length <= 10) continue;
-    const s = new Date(t.nextSession).getTime();
-    busy.push([s, s + 60 * MIN]);
+  for (const x of sessions) {
+    if (x.status !== 'planned' || !hasTime(x.date)) continue;
+    busy.push([sessionStart(x).getTime(), sessionEnd(x).getTime()]);
   }
   for (const t of tasks) {
     if (t.done || !t.planned) continue; // (past bookings can't clash with future slots anyway)

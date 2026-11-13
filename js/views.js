@@ -1,6 +1,7 @@
 // Each view returns an HTML string. Every piece of user data passes through esc().
 import { CATEGORIES, NOT_SPENDING, GIVING } from './expenses.js';
 import { suggest, busyTimes } from './planner.js';
+import { progress, needsLogging, isUpcoming, attendees, sessionStart } from './training.js';
 import { esc, money, fmtDay, fmtDT, fmtTime, parseDay, parseDT, startOfDay, sameDay, isoDay, DAY, monthlyCost } from './util.js';
 
 const hasTime = (s) => !!s && s.length > 10;
@@ -47,9 +48,10 @@ export function upcoming(s, days = 7) {
   const overdue = open.filter((t) => t.due && parseDT(t.due) < (hasTime(t.due) ? new Date() : today));
   const todayTasks = open.filter((t) => t.due && sameDay(parseDT(t.due), today) && !overdue.includes(t));
   const week = open.filter((t) => t.due && parseDT(t.due) >= new Date(today.getTime() + DAY) && parseDT(t.due) < until);
-  const trainings = s.trainings
-    .filter((t) => t.nextSession && parseDT(t.nextSession) >= today && parseDT(t.nextSession) < until)
-    .sort((a, b) => parseDT(a.nextSession) - parseDT(b.nextSession));
+  // planned training sessions this week, plus any whose time has passed and still need logging
+  const trainings = (s.sessions || [])
+    .filter((x) => x.status === 'planned' && sessionStart(x) && (needsLogging(x) || (sessionStart(x) >= today && sessionStart(x) < until)))
+    .sort((a, b) => sessionStart(a) - sessionStart(b));
   const bills = s.bills
     .filter((b) => b.nextDue && parseDay(b.nextDue) < until)
     .sort((a, b) => parseDay(a.nextDue) - parseDay(b.nextDue));
@@ -91,7 +93,7 @@ function suggestionsCard(s, cal, plan) {
   const st = s.settings;
   const open = s.tasks.filter((t) => !t.done);
   if (!open.length) return '';
-  const busy = busyTimes({ events: cal.connected ? cal.events : [], trainings: s.trainings, tasks: s.tasks });
+  const busy = busyTimes({ events: cal.connected ? cal.events : [], sessions: s.sessions || [], tasks: s.tasks });
   const list = suggest(s.tasks, busy, { dayStart: Number(st.planStart ?? 9), dayEnd: Number(st.planEnd ?? 22), skips: plan.skips || {} });
   const byId = Object.fromEntries(s.tasks.map((t) => [t.id, t]));
   const calList = cal.calendars || [];
@@ -117,11 +119,12 @@ function suggestionsCard(s, cal, plan) {
   </section>`;
 }
 
-function trainingMini(t) {
-  const d = parseDT(t.nextSession);
+function trainingMini(x, names = {}) {
+  const who = (x.traineeIds || []).map((id) => names[id]).filter(Boolean).join(', ');
+  const late = needsLogging(x);
   return `<li class="row"><div class="dot dot-train"></div><div class="row-main">
-    <div class="row-title">${esc(t.name)} · Lesson ${esc(t.currentLesson)}${t.totalLessons ? ` of ${esc(t.totalLessons)}` : ''}</div>
-    <div class="row-sub">${esc(fmtDT(d, hasTime(t.nextSession)))}${t.trainees ? ` · ${esc(t.trainees)}` : ''}</div></div></li>`;
+    <div class="row-title">${esc(x.title)}</div>
+    <div class="row-sub ${late ? 'late' : ''}">${esc(fmtDT(sessionStart(x), hasTime(x.date)))}${who ? ` · ${esc(who)}` : ''}${late ? ' · needs logging' : ''}</div></div></li>`;
 }
 
 function billMini(b, cur) {
@@ -206,7 +209,7 @@ export function today(s, cal, mail = {}, sync = null) {
     <h2>This week</h2>
     <div class="grid-3">
       <div><h3>To-dos</h3>${u.week.length ? `<ul class="list">${u.week.map((t) => taskRow(t, { compact: true })).join('')}</ul>` : empty('Clear week.')}</div>
-      <div><h3>Trainings</h3>${u.trainings.length ? `<ul class="list">${u.trainings.map(trainingMini).join('')}</ul>` : empty('No sessions scheduled.')}</div>
+      <div><h3>Trainings</h3>${u.trainings.length ? `<ul class="list">${u.trainings.map((x) => trainingMini(x, Object.fromEntries((s.trainees || []).map((t) => [t.id, t.name])))).join('')}</ul>` : empty('No sessions scheduled.')}</div>
       <div><h3>Bills due</h3>${u.bills.length ? `<ul class="list">${u.bills.map((b) => billMini(b, cur)).join('')}</ul>` : empty('Nothing due.')}</div>
     </div>
   </section>
@@ -472,61 +475,124 @@ function calendarOptions(cal, chosen) {
   return list.map((c) => `<option value="${esc(c.id)}" ${c.id === pick ? 'selected' : ''}>${esc(c.primary ? `${c.name} (main)` : c.name)}</option>`).join('');
 }
 
+const LENGTHS = [30, 45, 60, 90, 120, 180, 240];
+const lengthLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} hr${m > 60 ? 's' : ''}`.replace('1.5 hrs', '1½ hrs'));
+const sessionWhen = (x) => { const d = sessionStart(x); return d ? fmtDT(d, hasTime(x.date)) : 'No date'; };
+const longDate = (d) => d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+
+// "Who is being trained?": a drop-down list of your trainees with tick boxes, plus "add a new trainee".
+function traineePicker(trainees) {
+  return `<div class="field"><span class="field-label" id="who-label">Who is being trained?</span>
+    <details class="picker" data-picker aria-labelledby="who-label">
+      <summary><span data-picker-text>Choose trainees</span><span class="chev" aria-hidden="true"></span></summary>
+      <div class="picker-body">
+        <div class="picker-list">${trainees.map((t) => `<label class="check-label"><input type="checkbox" name="traineeIds" value="${esc(t.id)}"> ${esc(t.name)}</label>`).join('')}</div>
+        <p class="muted small picker-empty" ${trainees.length ? 'hidden' : ''}>No trainees yet. Add one below.</p>
+        <div class="inline-form"><input data-new-trainee placeholder="Add a new trainee" aria-label="New trainee's name" autocomplete="off">
+          <button type="button" class="btn-ghost sm" data-act="trainee-quick-add">Add</button></div>
+      </div>
+    </details></div>`;
+}
+
+function sessionRow(x, mode, names) {
+  const who = (x.traineeIds || []);
+  const start = sessionStart(x);
+  const timed = hasTime(x.date);
+  const dateInput = (name, val) => `<input name="${name}" type="${timed ? 'datetime-local' : 'date'}" value="${esc(val || '')}" required>`;
+  return `<li class="row col session">
+    <div class="row-head"><div class="row-main">
+      <div class="row-title">${esc(x.title)}</div>
+      <div class="row-sub ${mode === 'log' ? 'late' : ''}">${esc(sessionWhen(x))}${timed ? ` · ${esc(lengthLabel(Number(x.durationMin) || 60))}` : ''}${x.gcal?.eventId ? ' · in Google Calendar' : ''}</div>
+      ${who.length ? `<div class="chips">${who.map((id) => `<span class="tag">${esc(names[id] || 'Removed trainee')}</span>`).join('')}</div>` : ''}
+      ${x.description ? `<div class="row-note">${esc(x.description)}</div>` : ''}
+      ${x.notes ? `<div class="row-note"><strong>Notes:</strong> ${esc(x.notes)}</div>` : ''}
+    </div>
+    <button class="btn-ghost sm danger" data-act="session-del" data-id="${esc(x.id)}" aria-label="Delete training">✕</button></div>
+    <div class="row-actions wrap">
+      <details class="inline"><summary class="btn sm">✓ Log as covered</summary>
+        <form class="stack-form" data-form="session-done" data-id="${esc(x.id)}">
+          ${who.length ? `<fieldset class="attend"><legend>Who was there?</legend>${who.map((id) => `<label class="check-label"><input type="checkbox" name="attended" value="${esc(id)}" checked> ${esc(names[id] || 'Removed trainee')}</label>`).join('')}</fieldset>` : ''}
+          <label>Date taught${dateInput('date', x.date)}</label>
+          <label>What did you cover? (optional)<textarea name="doneNote" rows="2"></textarea></label>
+          <button class="btn sm">Save to log</button>
+        </form></details>
+      ${mode === 'log' ? `<button class="btn-ghost sm" data-act="session-cancel" data-id="${esc(x.id)}">Didn't happen</button>` : ''}
+      ${mode === 'upcoming' && timed && !x.gcal?.eventId ? `<button class="btn-ghost sm" data-act="session-gcal" data-id="${esc(x.id)}">+ Google Cal</button>` : ''}
+      ${mode === 'upcoming' && start ? `<button class="btn-ghost sm" data-act="session-ics" data-id="${esc(x.id)}">.ics</button>` : ''}
+      ${mode === 'upcoming' ? `<details class="inline"><summary class="btn-ghost sm">Reschedule</summary>
+        <form class="inline-form" data-form="session-resched" data-id="${esc(x.id)}">${dateInput('date', x.date)}<button class="btn sm">Save</button></form></details>` : ''}
+    </div>
+  </li>`;
+}
+
 export function trainingView(s, cal = {}) {
+  const now = new Date();
   const calOk = cal.connected && (cal.calendars || []).length > 0;
   const trainingDefault = s.settings.trainingCalendarId || s.settings.calendarId;
-  const list = [...s.trainings].sort((a, b) => (a.nextSession || '9999').localeCompare(b.nextSession || '9999'));
-  return `<header class="page-head"><h1>Training tracker</h1></header>
+  const all = s.sessions || [];
+  const active = (s.trainees || []).filter((t) => !t.archived).sort((a, b) => a.name.localeCompare(b.name));
+  const names = Object.fromEntries((s.trainees || []).map((t) => [t.id, t.name]));
+  const toLog = all.filter((x) => needsLogging(x, now)).sort((a, b) => sessionStart(a) - sessionStart(b));
+  const upcomingList = all.filter((x) => isUpcoming(x, now)).sort((a, b) => (sessionStart(a) || Infinity) - (sessionStart(b) || Infinity));
+  const history = all.filter((x) => x.status === 'done').sort((a, b) => sessionStart(b) - sessionStart(a));
+  const prog = progress(s, now);
+
+  return `<header class="page-head"><h1>Training</h1></header>
   ${cal.connected && !calOk ? `<section class="card">${calendarAccessNote(cal)}</section>` : ''}
+
   <section class="card">
-    <details ${list.length ? '' : 'open'}><summary class="btn-ghost">+ New training programme</summary>
-    <form class="stack-form" data-form="training">
-      <div class="field-row">
-        <label>Training name<input name="name" required placeholder="e.g. First aid course"></label>
-        <label>Group / trainees<input name="trainees" placeholder="e.g. Platoon 2"></label>
-      </div>
-      <div class="field-row three">
-        <label>Total lessons<input name="totalLessons" type="number" min="1" inputmode="numeric"></label>
-        <label>Current lesson<input name="currentLesson" type="number" min="1" value="1" required inputmode="numeric"></label>
-        <label>Next session<input name="nextSession" type="datetime-local"></label>
-      </div>
-      <label>Notes<textarea name="notes" rows="2"></textarea></label>
-      ${calOk ? `<label>Google Calendar for its sessions<select name="calendarId">${calendarOptions(cal, trainingDefault)}</select></label>` : ''}
-      <button class="btn">Add training</button>
-    </form></details>
+    <details class="fold" data-fold="newTraining" ${ui.open.newTraining ?? !all.length ? 'open' : ''}>
+      <summary><span class="fold-label">+ New training</span><span class="chev" aria-hidden="true"></span></summary>
+      <form class="stack-form spaced" data-form="session">
+        <label>Title of training<input name="title" required autocomplete="off" placeholder="e.g. First aid: CPR"></label>
+        <label>Description<textarea name="description" rows="2" placeholder="What this training covers"></textarea></label>
+        ${traineePicker(active)}
+        <div class="field-row">
+          <label>Training date<input name="date" type="datetime-local" required></label>
+          <label>Length<select name="durationMin">${LENGTHS.map((m) => `<option value="${m}" ${m === 60 ? 'selected' : ''}>${esc(lengthLabel(m))}</option>`).join('')}</select></label>
+        </div>
+        <label>Notes<textarea name="notes" rows="2"></textarea></label>
+        ${s.settings.googleClientId ? `<div class="gcal-row">
+          <label class="check-label"><input type="checkbox" name="toCal" checked> Add to Google Calendar</label>
+          ${calOk ? `<label class="inline-label">Calendar<select class="sm-select" name="calendarId">${calendarOptions(cal, trainingDefault)}</select></label>` : ''}
+        </div>` : ''}
+        <p class="hint">A date in the past is saved straight into the log as covered.</p>
+        <button class="btn">Save training</button>
+      </form>
+    </details>
   </section>
-  ${list.length ? `<div class="cards">${list.map((t) => {
-    const total = Number(t.totalLessons) || 0;
-    const cur = Number(t.currentLesson) || 1;
-    const finished = total && cur > total;
-    const pct = total ? Math.min(100, ((cur - 1) / total) * 100) : 0;
-    const next = parseDT(t.nextSession);
-    return `<article class="card training">
-      <div class="row-head"><div><h2>${esc(t.name)}</h2>${t.trainees ? `<p class="muted">${esc(t.trainees)}</p>` : ''}</div>
-        <button class="btn-ghost sm danger" data-act="training-del" data-id="${esc(t.id)}" aria-label="Delete">✕</button></div>
-      <div class="lesson-line"><span class="big">${finished ? 'Completed' : `Lesson ${esc(cur)}`}</span>${total ? `<span class="muted">of ${esc(total)}</span>` : ''}</div>
-      ${total ? `<div class="progress"><span data-w="${finished ? 100 : pct}"></span></div>` : ''}
-      <p class="next ${next && next < new Date() ? 'late' : ''}">Next session: <strong>${next ? esc(fmtDT(next, hasTime(t.nextSession))) : 'not set'}</strong></p>
-      ${t.notes ? `<p class="row-note">${esc(t.notes)}</p>` : ''}
-      ${finished ? '' : `<details><summary class="btn">Lesson ${esc(cur)} done →</summary>
-        <form class="stack-form" data-form="lesson-done" data-id="${esc(t.id)}">
-          <label>How did it go? (optional)<input name="note" autocomplete="off"></label>
-          <label>Next session${total && cur + 1 > total ? ' (not needed, this was the last lesson)' : ''}<input name="nextSession" type="datetime-local"></label>
-          <button class="btn">Save & move to lesson ${esc(cur + 1)}</button>
-        </form></details>`}
-      <div class="row-actions wrap">
-        ${next && calOk ? `<label class="sr-only" for="tcal-${esc(t.id)}">Google Calendar for ${esc(t.name)}</label>
-        <select class="sm-select" id="tcal-${esc(t.id)}" data-act="training-cal" data-id="${esc(t.id)}" title="Which Google calendar this training's sessions go to">${calendarOptions(cal, t.calendarId || trainingDefault)}</select>` : ''}
-        ${next ? `<button class="btn-ghost sm" data-act="training-gcal" data-id="${esc(t.id)}">+ Google Cal</button>
-        <button class="btn-ghost sm" data-act="training-ics" data-id="${esc(t.id)}">.ics</button>` : ''}
-        <details class="inline"><summary class="btn-ghost sm">Reschedule</summary>
-          <form class="inline-form" data-form="training-resched" data-id="${esc(t.id)}">
-            <input name="nextSession" type="datetime-local" value="${esc(t.nextSession || '')}" required><button class="btn-ghost sm">Save</button>
-          </form></details>
+
+  ${toLog.length ? `<section class="card"><h2>Did these happen?</h2>
+    <p class="muted small">Log each one as covered (and who was there), or mark it as not happened.</p>
+    <ul class="list">${toLog.map((x) => sessionRow(x, 'log', names)).join('')}</ul></section>` : ''}
+
+  <section class="card"><h2>Upcoming</h2>
+    ${upcomingList.length ? `<ul class="list">${upcomingList.map((x) => sessionRow(x, 'upcoming', names)).join('')}</ul>` : empty('No trainings planned.')}
+  </section>
+
+  <section class="card"><h2>Trainees' progress</h2>
+    ${prog.length ? `<ul class="list">${prog.map(({ trainee: t, covered, next, last }) => `<li class="row col trainee">
+      <div class="row-head"><div class="row-main">
+        <div class="row-title">${esc(t.name)}</div>
+        <div class="row-sub"><strong class="count">${covered.length}</strong> lesson${covered.length === 1 ? '' : 's'} covered${last ? ` · last ${esc(longDate(sessionStart(last)))}` : ''} · next: ${next ? `${esc(next.title)}, ${esc(sessionWhen(next))}` : 'none planned'}</div>
       </div>
-      ${t.log?.length ? `<details><summary class="muted">History (${t.log.length})</summary><ul class="log">${[...t.log].reverse().map((l) => `<li><strong>Lesson ${esc(l.lesson)}</strong> · ${esc(fmtDay(parseDay(l.date)))}${l.note ? ` · ${esc(l.note)}` : ''}</li>`).join('')}</ul></details>` : ''}
-    </article>`;
-  }).join('')}</div>` : ''}`;
+      <button class="btn-ghost sm danger" data-act="trainee-remove" data-id="${esc(t.id)}" aria-label="Remove ${esc(t.name)}">✕</button></div>
+      ${covered.length ? `<details class="fold inner" data-fold="log-${esc(t.id)}" ${ui.open[`log-${t.id}`] ? 'open' : ''}>
+        <summary><span class="fold-label">Lesson log</span><span class="muted small">${covered.length}</span><span class="chev" aria-hidden="true"></span></summary>
+        <ol class="log-list">${covered.map((x) => `<li><span class="log-date">${esc(longDate(sessionStart(x)))}</span><span class="log-what">${esc(x.title)}${x.doneNote ? `<span class="muted"> · ${esc(x.doneNote)}</span>` : ''}</span></li>`).join('')}</ol>
+      </details>` : ''}
+    </li>`).join('')}</ul>` : empty('No trainees yet.')}
+    <form class="inline-form" data-form="trainee-add">
+      <input name="name" required placeholder="Add a trainee" aria-label="Trainee's name" autocomplete="off"><button class="btn-ghost">Add</button>
+    </form>
+  </section>
+
+  ${history.length ? `<section class="card"><details class="fold" data-fold="trainHistory" ${ui.open.trainHistory ? 'open' : ''}>
+    <summary><span class="fold-label">All lessons covered</span><span class="muted small">${history.length}</span><span class="chev" aria-hidden="true"></span></summary>
+    <ol class="log-list">${history.map((x) => `<li><span class="log-date">${esc(longDate(sessionStart(x)))}</span><span class="log-what">${esc(x.title)}
+      <span class="muted"> · ${esc(attendees(x).map((id) => names[id] || 'Removed trainee').join(', ') || 'no one marked present')}${x.doneNote ? ` · ${esc(x.doneNote)}` : ''}</span></span>
+      <button class="btn-ghost sm" data-act="session-undo" data-id="${esc(x.id)}" title="Move back to planned">Undo</button></li>`).join('')}</ol>
+  </details></section>` : ''}`;
 }
 
 // ---------- CALENDAR ----------

@@ -10,8 +10,8 @@ const events = [
   { start: iso(at(11, 0)), end: iso(at(12, 0)), allDay: true },     // all-day: doesn't block
   { start: iso(at(11, 16, 0)), end: iso(at(11, 18, 0)), free: true }, // marked free: doesn't block
 ];
-const trainings = [{ nextSession: '2026-11-11T18:00' }];            // 6-7pm
-const busy = busyTimes({ events, trainings });
+const sessions = [{ date: '2026-11-11T18:00', durationMin: 60, status: 'planned' }]; // training 6-7pm
+const busy = busyTimes({ events, sessions });
 const tasks = [
   { id: 'a', title: 'Undated', mins: 30 },
   { id: 'b', title: 'Due today 6pm', due: '2026-11-11T18:00', mins: 60 },

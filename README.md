@@ -11,7 +11,7 @@ It's a web app you can install on your phone's home screen and also open on your
 | **Today** | Morning brief: overdue and today's to-dos, today's calendar events, this week's to-dos, trainings and bills, and the month's money snapshot. Quick-add a to-do. |
 | **Money** | Log income (one-off or monthly); money received that DBS emails you about is added automatically. Shows income this month and the total for the year. Budgets & savings as a fixed amount or a % of income, with this month's progress. A **Tithe** budget (10% of income) is set up for you, and any payment categorised "Tithe & giving" counts towards it instead of as spending. Bills & subscriptions with weekly/monthly/yearly cycles, a "Paid" button that rolls the due date forward, and monthly/yearly totals. **Spending is logged automatically from your DBS/POSB alert emails** (card, PayNow, PayLah!), sorted into categories you can correct (the app remembers your corrections). Cash can be added by hand, or paste any DBS alert text. "Left to spend" = income − bills − savings − spending. |
 | **To-dos** | To-dos with due date/time, how long they take, notes and reminders. **Suggested times** finds a free slot in your calendar for each open to-do (most urgent first, before it's due, within the hours you set in Settings), avoiding your Google Calendar events and trainings. **Book it** adds that time to the Google calendar you choose; **Another time** offers the next slot; **Unbook** removes it again. You can also push any to-do to Google Calendar or download it as an `.ics` file. |
-| **Training** | Each programme tracks group/trainees, current lesson out of total, next session, notes and a lesson history. "Lesson done" logs it, moves to the next lesson and asks for the next date. Each training has its own Google calendar for its sessions (chosen when you add it, changeable on its card next to **+ Google Cal**). |
+| **Training** | Add a training with a title, description, **who is being trained** (pick one or more trainees from a drop-down; add new ones right there), date, length and notes, and add it to the Google calendar you choose. Afterwards, **log it as covered** and tick who was there. Each trainee has a **lesson log**: every lesson they covered and when. Past trainings that weren't logged are listed under "Did these happen?". Rescheduling or deleting a training updates Google Calendar too. |
 | **Calendar** | See the next 7 days from every calendar you have ticked in Google Calendar (each in its own colour), and add events with a reminder to whichever of your calendars you pick. The choice is remembered and also used for to-dos and trainings you send to Google Calendar. |
 | **Settings** | Currency, morning brief time, auto-lock, notifications, encrypted backup export/import, change passphrase, erase device. |
 
@@ -113,11 +113,12 @@ js/google.js          One Google sign-in shared by Calendar, Gmail and sync (tok
 js/sync.js            Encrypted vault file in Google Drive's hidden app folder
 js/merge.js           Combines changes from two devices (3-way merge)
 js/planner.js         Finds free calendar slots for to-dos
+js/training.js        Trainees, training sessions and each trainee's lesson log
 js/config.js          Optional Google Client ID for new devices
 js/gcal.js            Google Calendar (direct from browser) + .ics export
 js/gmail.js           Reads DBS alert emails from Gmail (DBS senders only, DMARC-verified)
 js/expenses.js        Parses DBS alerts, auto-categorises spending
-tests/                node tests/expenses.test.mjs && node tests/merge.test.mjs && node tests/planner.test.mjs
+tests/                node tests/expenses.test.mjs && node tests/merge.test.mjs && node tests/planner.test.mjs && node tests/training.test.mjs
 js/views.js           Screens
 js/app.js             Lock screen, actions, reminders, morning brief, auto-lock
 js/util.js            Date and money helpers

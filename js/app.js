@@ -4,6 +4,7 @@ import * as gcal from './gcal.js';
 import * as gmail from './gmail.js';
 import * as sync from './sync.js';
 import { mergeState } from './merge.js';
+import { sessionStart, sessionEnd, attendees } from './training.js';
 import { GOOGLE_CLIENT_ID } from './config.js';
 import { parseAlert, categorize, merchantKey, CATEGORIES } from './expenses.js';
 import * as V from './views.js';
@@ -366,14 +367,15 @@ function eventFromTask(t) {
   return { title: t.title, description: t.notes || 'From Caden Tracker', start, end: new Date(start.getTime() + 30 * 60000), reminderMin: allDayish ? 60 : 15 };
 }
 
-function eventFromTraining(t) {
-  const start = parseDT(t.nextSession);
+// A training session as a calendar event: its description, who it's for and your notes.
+function eventFromSession(x) {
+  const st = store.state;
+  const names = (x.traineeIds || []).map((id) => st.trainees.find((t) => t.id === id)?.name).filter(Boolean);
   return {
-    title: `${t.name}: Lesson ${t.currentLesson}${t.totalLessons ? `/${t.totalLessons}` : ''}`,
-    description: [t.trainees && `Group: ${t.trainees}`, t.notes].filter(Boolean).join('\n') || 'From Caden Tracker',
-    start, end: new Date(start.getTime() + 60 * 60000), reminderMin: 60,
-    // this training's own calendar, else the one last picked on the Training tab, else the Calendar tab's
-    calendarId: t.calendarId || store.state.settings.trainingCalendarId || '',
+    title: x.title,
+    description: [x.description, names.length ? `Trainees: ${names.join(', ')}` : '', x.notes ? `Notes: ${x.notes}` : ''].filter(Boolean).join('\n\n'),
+    start: sessionStart(x), end: sessionEnd(x), reminderMin: 60,
+    calendarId: x.gcal?.calendarId || st.settings.trainingCalendarId || '',
   };
 }
 
@@ -476,6 +478,47 @@ async function syncExpenses(interactive) {
   }
 }
 
+// ---------------- trainee picker ----------------
+function updatePickerText(picker) {
+  if (!picker) return;
+  const chosen = [...picker.querySelectorAll('input[name="traineeIds"]:checked')].map((i) => i.parentElement.textContent.trim());
+  picker.querySelector('[data-picker-text]').textContent = chosen.length ? chosen.join(', ') : 'Choose trainees';
+}
+
+// Adds a trainee from inside the "Who is being trained?" list without redrawing the screen,
+// so what you've typed in the rest of the form stays.
+async function quickAddTrainee(picker) {
+  const input = picker?.querySelector('[data-new-trainee]');
+  const name = input?.value.trim();
+  if (!name) { input?.focus(); return; }
+  const st = store.state;
+  let t = st.trainees.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  if (t) t.archived = false;
+  else { t = { id: store.uid(), name, notes: '', archived: false }; st.trainees.push(t); }
+  await store.save();
+  scheduleSync();
+  let box = picker.querySelector(`input[name="traineeIds"][value="${CSS.escape(t.id)}"]`);
+  if (!box) {
+    const label = document.createElement('label');
+    label.className = 'check-label';
+    box = document.createElement('input');
+    box.type = 'checkbox'; box.name = 'traineeIds'; box.value = t.id;
+    label.append(box, ` ${t.name}`);
+    picker.querySelector('.picker-list').append(label);
+  }
+  box.checked = true;
+  picker.querySelector('.picker-empty')?.setAttribute('hidden', '');
+  input.value = '';
+  input.focus();
+  updatePickerText(picker);
+  toast(`${t.name} added and ticked`);
+}
+
+// Enter in "Add a new trainee" adds the trainee instead of submitting the whole form.
+viewEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches?.('[data-new-trainee]')) { e.preventDefault(); quickAddTrainee(e.target.closest('[data-picker]')).catch((err) => toast(err.message, true)); }
+});
+
 // ---------------- clicks ----------------
 viewEl.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-act]');
@@ -517,9 +560,40 @@ viewEl.addEventListener('click', async (e) => {
       case 'saving-del': if (!confirm('Delete this savings budget?')) return; s.savings = s.savings.filter((x) => x.id !== id); return commit();
       case 'bill-del': s.bills = s.bills.filter((x) => x.id !== id); return commit();
       case 'bill-paid': { const b = find(s.bills); b.nextDue = advanceDue(b.nextDue, b.cycle); return commit(`${b.name}: next due moved on`); }
-      case 'training-del': if (!confirm('Delete this training and its history?')) return; s.trainings = s.trainings.filter((x) => x.id !== id); return commit();
-      case 'training-gcal': return pushToCalendar(eventFromTraining(find(s.trainings)));
-      case 'training-ics': { const t = find(s.trainings); return download(`${safeName(t.name)}.ics`, gcal.icsFor(eventFromTraining(t)), 'text/calendar'); }
+      case 'session-del': {
+        const x = find(s.sessions);
+        const inCal = !!x.gcal?.eventId;
+        if (!confirm(`Delete "${x.title}"${x.status === 'done' ? ' and remove it from the log' : ''}?${inCal && x.status === 'planned' ? ' It will also be removed from Google Calendar.' : ''}`)) return;
+        if (inCal && x.status === 'planned') { await ensureCalendar(); await gcal.deleteEvent(x.gcal.calendarId, x.gcal.eventId); }
+        store.state.sessions = store.state.sessions.filter((y) => y.id !== id);
+        await commit('Training deleted');
+        return inCal ? refreshCalendar() : undefined;
+      }
+      case 'session-cancel': {
+        const x = find(s.sessions);
+        x.status = 'cancelled';
+        return commit("Marked as didn't happen");
+      }
+      case 'session-undo': {
+        const x = find(s.sessions);
+        x.status = 'planned'; x.attended = null; x.notifiedFor = x.date;
+        return commit('Moved back to planned');
+      }
+      case 'session-gcal': {
+        const x = find(s.sessions);
+        const booked = await pushToCalendar(eventFromSession(x));
+        const xx = store.state.sessions.find((y) => y.id === id) || x;
+        xx.gcal = { eventId: booked.eventId, calendarId: booked.calendarId };
+        return commit();
+      }
+      case 'session-ics': { const x = find(s.sessions); return download(`${safeName(x.title)}.ics`, gcal.icsFor(eventFromSession(x)), 'text/calendar'); }
+      case 'trainee-remove': {
+        const t = find(s.trainees);
+        if (!confirm(`Remove ${t.name} from the trainee list? Their lesson log stays in your history.`)) return;
+        t.archived = true;
+        return commit(`${t.name} removed`);
+      }
+      case 'trainee-quick-add': return quickAddTrainee(el.closest('[data-picker]'));
       case 'gmail-sync': return await syncExpenses(true);
       case 'gmail-disconnect':
       case 'gcal-disconnect':
@@ -583,15 +657,7 @@ viewEl.addEventListener('change', async (e) => {
     store.state.settings.planCalendarId = e.target.value;
     return commit();
   }
-  if (e.target.dataset.act === 'training-cal') {
-    const s = store.state;
-    const t = s.trainings.find((x) => x.id === e.target.dataset.id);
-    if (!t || !cal.calendars.some((c) => c.id === e.target.value)) return;
-    t.calendarId = e.target.value;
-    s.settings.trainingCalendarId = e.target.value;
-    const c = cal.calendars.find((x) => x.id === t.calendarId);
-    return commit(`${t.name} will go to ${c.primary ? 'your main calendar' : c.name}`);
-  }
+  if (e.target.name === 'traineeIds') return updatePickerText(e.target.closest('[data-picker]'));
   if (e.target.dataset.act === 'exp-cat') {
     const s = store.state;
     const x = s.expenses.find((ex) => ex.id === e.target.dataset.id);
@@ -682,31 +748,60 @@ viewEl.addEventListener('submit', async (e) => {
         s.bills.push({ id: store.uid(), name: f.name.trim(), amount: num(f.amount), cycle: f.cycle, nextDue: f.nextDue, kind: f.kind });
         return commit('Added');
 
-      case 'training':
-        s.trainings.push({
-          id: store.uid(), name: f.name.trim(), trainees: f.trainees.trim(), totalLessons: f.totalLessons ? num(f.totalLessons) : '',
-          currentLesson: num(f.currentLesson) || 1, nextSession: f.nextSession || '', notes: f.notes.trim(), log: [], notifiedFor: '',
-          calendarId: f.calendarId || '',
-        });
+      case 'session': {
+        const traineeIds = new FormData(form).getAll('traineeIds');
+        if (!traineeIds.length) throw new Error('Choose who is being trained (open "Who is being trained?")');
+        const x = {
+          id: store.uid(), title: f.title.trim(), description: f.description.trim(), traineeIds, date: f.date,
+          durationMin: num(f.durationMin) || 60, notes: f.notes.trim(), status: 'planned', attended: null, doneNote: '', gcal: null, notifiedFor: '',
+        };
+        const past = sessionEnd(x) < new Date();
+        if (past) { x.status = 'done'; x.attended = [...traineeIds]; }
         if (f.calendarId) s.settings.trainingCalendarId = f.calendarId;
-        return commit('Training added');
-
-      case 'lesson-done': {
-        const t = s.trainings.find((x) => x.id === id);
-        t.log = t.log || [];
-        t.log.push({ date: isoDay(), lesson: t.currentLesson, note: f.note.trim() });
-        t.currentLesson = num(t.currentLesson) + 1;
-        t.nextSession = f.nextSession || '';
-        t.notifiedFor = '';
-        const done = t.totalLessons && t.currentLesson > t.totalLessons;
-        return commit(done ? `${t.name} completed 🎉` : `Now on lesson ${t.currentLesson}`);
+        // add to Google Calendar first, while this is still your tap (Google's sign-in may need to open)
+        let calNote = '';
+        if (f.toCal && !past) {
+          try {
+            const booked = await pushToCalendar({ ...eventFromSession(x), calendarId: f.calendarId || '' });
+            x.gcal = { eventId: booked.eventId, calendarId: booked.calendarId };
+            calNote = ` and added to ${booked.calendarName}`;
+          } catch (err) { calNote = `, but not added to Google Calendar (${err.message})`; }
+        }
+        store.state.sessions.push(x);
+        if (f.calendarId) store.state.settings.trainingCalendarId = f.calendarId;
+        V.ui.open.newTraining = false;
+        return commit(past ? 'Saved to the log as covered' : `Training saved${calNote}`);
       }
 
-      case 'training-resched': {
-        const t = s.trainings.find((x) => x.id === id);
-        t.nextSession = f.nextSession;
-        t.notifiedFor = '';
+      case 'session-done': {
+        const x = s.sessions.find((y) => y.id === id);
+        x.attended = new FormData(form).getAll('attended');
+        if (f.date) x.date = f.date;
+        x.doneNote = (f.doneNote || '').trim();
+        x.status = 'done';
+        const n = x.attended.length;
+        return commit(n ? `Logged for ${n} trainee${n === 1 ? '' : 's'}` : 'Logged (no one marked present)');
+      }
+
+      case 'session-resched': {
+        const x = s.sessions.find((y) => y.id === id);
+        x.date = f.date;
+        x.notifiedFor = '';
+        if (x.gcal?.eventId && f.date.length > 10) {
+          await ensureCalendar();
+          await gcal.moveEvent(x.gcal.calendarId, x.gcal.eventId, sessionStart(x), sessionEnd(x));
+          await commit('Rescheduled here and in Google Calendar');
+          return refreshCalendar();
+        }
         return commit('Rescheduled');
+      }
+
+      case 'trainee-add': {
+        const name = f.name.trim();
+        const same = s.trainees.find((t) => t.name.toLowerCase() === name.toLowerCase());
+        if (same && !same.archived) throw new Error(`${same.name} is already on the list`);
+        if (same) same.archived = false; else s.trainees.push({ id: store.uid(), name, notes: '', archived: false });
+        return commit(`${name} added`);
       }
 
       case 'event': {
@@ -778,8 +873,8 @@ function briefText() {
   const parts = [];
   if (u.overdue.length) parts.push(`${u.overdue.length} overdue`);
   parts.push(`${u.todayTasks.length} to-do${u.todayTasks.length === 1 ? '' : 's'} today`);
-  const todayTrain = u.trainings.filter((t) => parseDT(t.nextSession) < new Date(startOfDay().getTime() + DAY));
-  if (todayTrain.length) parts.push(`training: ${todayTrain.map((t) => `${t.name} L${t.currentLesson}`).join(', ')}`);
+  const todayTrain = u.trainings.filter((x) => sessionStart(x) >= startOfDay() && sessionStart(x) < new Date(startOfDay().getTime() + DAY));
+  if (todayTrain.length) parts.push(`training: ${todayTrain.map((x) => x.title).join(', ')}`);
   const billsSoon = u.bills.filter((b) => parseDay(b.nextDue) < new Date(startOfDay().getTime() + 3 * DAY));
   if (billsSoon.length) parts.push(`bills due: ${billsSoon.map((b) => b.name).join(', ')}`);
   const week = u.week.length + u.trainings.length - todayTrain.length;
@@ -814,13 +909,13 @@ async function checkReminders() {
       changed = true;
     }
   }
-  for (const t of s.trainings) {
-    if (!t.nextSession || t.notifiedFor === t.nextSession) continue;
-    const start = parseDT(t.nextSession);
+  for (const x of s.sessions || []) {
+    if (x.status !== 'planned' || !x.date || x.date.length <= 10 || x.notifiedFor === x.date) continue;
+    const start = sessionStart(x);
     const mins = (start - now) / 60000;
     if (mins <= 60 && mins > -30) {
-      await notify('Training soon', `${t.name}: lesson ${t.currentLesson} at ${fmtTime(start)}`, `train-${t.id}`);
-      t.notifiedFor = t.nextSession;
+      await notify('Training soon', `${x.title} at ${fmtTime(start)}`, `train-${x.id}`);
+      x.notifiedFor = x.date;
       changed = true;
     }
   }

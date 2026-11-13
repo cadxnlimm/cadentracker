@@ -80,6 +80,15 @@ export function createEvent({ title, description = '', start, end, reminderMin =
   });
 }
 
+// Moves an event this app created to a new time (keeps its title, description and reminders).
+export function moveEvent(calendarId, eventId, start, end) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return call(`${eventsUrl(calendarId)}/${encodeURIComponent(eventId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ start: { dateTime: start.toISOString(), timeZone: tz }, end: { dateTime: end.toISOString(), timeZone: tz } }),
+  });
+}
+
 // Removes an event this app booked (e.g. when you un-book a to-do's time).
 export async function deleteEvent(calendarId, eventId) {
   await google.authFetch(`${eventsUrl(calendarId)}/${encodeURIComponent(eventId)}`, { method: 'DELETE' }, 'Google Calendar').catch((err) => {

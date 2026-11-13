@@ -1,4 +1,5 @@
 // Encrypted vault kept in this browser's IndexedDB. Only ciphertext is ever written to disk.
+import { migrateTrainings } from './training.js';
 import { deriveKey, encryptJSON, decryptJSON, randomBytes, saltOf, b64, ITERATIONS } from './crypto.js';
 
 const DB_NAME = 'cadentracker';
@@ -16,7 +17,9 @@ export function emptyState() {
     savings: [],        // {id, name, monthly, pct (% of the month's income, overrides monthly), target, saved, log: [{date, amount}]}
     bills: [],          // {id, name, amount, cycle: 'weekly'|'monthly'|'yearly', nextDue, kind: 'subscription'|'bill'}
     tasks: [],          // {id, title, due, notes, done, remind, notified, mins (how long it takes), planned: {start, end} once booked}
-    trainings: [],      // {id, name, trainees, totalLessons, currentLesson, nextSession, notes, log: [{date, lesson, note}]}
+    trainings: [],      // old course-style trainings (moved to trainees + sessions on first unlock; kept as a backup)
+    trainees: [],       // {id, name, notes, archived}
+    sessions: [],       // training sessions: see js/training.js
     expenses: [],       // {id, when, amount, currency, merchant, category, via: 'card'|'paynow'|'paylah'|'transfer'|'cash', source: 'email'|'manual'|'pasted', msgId}
     categoryRules: {},  // merchantKey -> category, learnt when you re-categorise an expense
     expenseSync: { lastSync: 0, seen: [] }, // Gmail alert import: last check (unix s) and alert IDs already read
@@ -62,14 +65,20 @@ export async function createVault(passphrase) {
 // One-off additions to existing data. Each runs once per vault.
 function migrate() {
   const st = state.settings;
+  let changed = false;
+  if (!st.trainingV2) {
+    migrateTrainings(state);
+    st.trainingV2 = true;
+    changed = true;
+  }
   if (!st.titheAdded) {
     if (!state.savings.some((g) => /^tithe$/i.test(g.name))) {
       state.savings.unshift({ id: uid(), name: 'Tithe', monthly: 0, pct: 10, target: 0, saved: 0, log: [] });
     }
     st.titheAdded = true;
-    return true;
+    changed = true;
   }
-  return false;
+  return changed;
 }
 
 export async function unlock(passphrase) {
